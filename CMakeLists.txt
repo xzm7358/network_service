@@ -1,0 +1,37 @@
+cmake_minimum_required(VERSION 3.10)
+
+project(NetworkService VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(NETWORK_SERVICE_TARGET network_service)
+
+add_executable(${NETWORK_SERVICE_TARGET}
+    src/main.cpp
+    src/service/network_daemon.cpp
+    src/ipc/network_ipc_server.cpp
+    src/platform/interface_snapshot.cpp
+    src/config/ethernet_config.cpp
+    src/platform/ethernet_apply.cpp
+    src/platform/wifi_backend.cpp
+    src/platform/wpa_event_monitor.cpp
+)
+
+target_include_directories(${NETWORK_SERVICE_TARGET} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_compile_definitions(${NETWORK_SERVICE_TARGET} PRIVATE
+    NETWORK_SERVICE_VERSION=\"${PROJECT_VERSION}\"
+)
+
+target_link_libraries(${NETWORK_SERVICE_TARGET} PRIVATE pthread)
+
+set_target_properties(${NETWORK_SERVICE_TARGET} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/app/smartcontrol/dnake/bin"
+)
+
+install(TARGETS ${NETWORK_SERVICE_TARGET}
+    RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")

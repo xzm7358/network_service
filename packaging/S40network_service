@@ -1,0 +1,29 @@
+#!/bin/sh
+
+SOCKET_PATH=${NETWORK_SERVICE_SOCKET:-/tmp/smart_hmi_network.sock}
+ETH_IFACE=${NETWORK_SERVICE_ETH:-eth0}
+WIFI_IFACE=${NETWORK_SERVICE_WIFI:-wlan0}
+EVENT_DIR=${NETWORK_SERVICE_EVENT_DIR:-/var/run/wpa_supplicant}
+BIN=${NETWORK_SERVICE_BIN:-/dnake/bin/network_service}
+
+case "$1" in
+  start)
+    echo "Starting network_service..."
+    mkdir -p /tmp
+    "$BIN" --socket "$SOCKET_PATH" --eth "$ETH_IFACE" --wifi "$WIFI_IFACE" --config-dir /dnake/data --event-dir "$EVENT_DIR" &
+    ;;
+  stop)
+    echo "Stopping network_service..."
+    killall network_service 2>/dev/null
+    rm -f "$SOCKET_PATH"
+    ;;
+  restart)
+    "$0" stop
+    sleep 1
+    "$0" start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
