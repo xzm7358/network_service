@@ -402,6 +402,10 @@ bool Session::ready() const {
     return state_ == State::Ready;
 }
 
+bool Session::events_subscribed() const {
+    return events_subscribed_;
+}
+
 Session::HandleResult Session::error_result(const char *code,
                                             const char *message,
                                             bool close_after_send) {
@@ -415,7 +419,7 @@ Session::HandleResult Session::ready_result() {
     std::ostringstream os;
     os << "{\"version\":1,\"service\":\"network_service\",\"sessionId\":\""
        << session_id_ << "\",\"generation\":" << generation_
-       << ",\"capabilities\":[\"request-response\"]}";
+       << ",\"capabilities\":[\"request-response\",\"events\"]}";
     return {encode_json(MessageType::Ready, os.str()), false};
 }
 
@@ -460,6 +464,16 @@ Session::HandleResult Session::handle_request(const std::string &payload) {
         return response_success(
             request.request_id,
             "{\"service\":\"network_service\",\"protocolVersion\":1}");
+    }
+
+    if (request.method == "network.events.subscribe") {
+        const bool first_subscription = !events_subscribed_;
+        events_subscribed_ = true;
+        HandleResult result = response_success(request.request_id, "{\"subscribed\":true}");
+        if (first_subscription) {
+            result.server_action = ServerAction::EmitEventsSubscribed;
+        }
+        return result;
     }
 
     return response_error(request.request_id,
