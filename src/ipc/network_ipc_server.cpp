@@ -15,8 +15,10 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <utility>
 
 #include "ipc/network_ipc_v1_codec.h"
+#include "ipc/network_ipc_v1_outbound.h"
 #include "ipc/network_ipc_v1_rebase.h"
 #include "ipc/network_ipc_v1_session.h"
 #include "network_service_protocol.h"
@@ -121,13 +123,29 @@ static bool send_all(int fd, const std::string &data) {
                           data.size());
 }
 
-static bool send_all(int fd, const std::vector<std::uint8_t> &data) {
-    return data.empty() || send_all_bytes(fd, data.data(), data.size());
-}
-
 static bool starts_with_v1_magic(const std::vector<std::uint8_t> &data) {
     return data.size() >= sizeof(kV1Magic) &&
            std::equal(kV1Magic, kV1Magic + sizeof(kV1Magic), data.begin());
+}
+
+static const char *outbound_enqueue_name(ipc_v1::OutboundEnqueueResult result) {
+    switch (result) {
+    case ipc_v1::OutboundEnqueueResult::Accepted: return "accepted";
+    case ipc_v1::OutboundEnqueueResult::InvalidFrame: return "invalid_frame";
+    case ipc_v1::OutboundEnqueueResult::FrameTooLarge: return "frame_too_large";
+    case ipc_v1::OutboundEnqueueResult::Overflow: return "overflow";
+    }
+    return "unknown";
+}
+
+static const char *outbound_flush_name(ipc_v1::OutboundFlushResult result) {
+    switch (result) {
+    case ipc_v1::OutboundFlushResult::Drained: return "drained";
+    case ipc_v1::OutboundFlushResult::SlowClient: return "slow_client";
+    case ipc_v1::OutboundFlushResult::Interrupted: return "interrupted";
+    case ipc_v1::OutboundFlushResult::Disconnected: return "disconnected";
+    }
+    return "unknown";
 }
 
 } // namespace
@@ -416,28 +434,59 @@ void NetworkIpcServer::handle_v1_client(int client_fd, const std::vector<std::ui
     session_id << "ns-" << generation_ << '-' << next_session_sequence_++;
     ipc_v1::Session session(generation_, session_id.str());
     ipc_v1::FrameDecoder decoder;
+    ipc_v1::OutboundWriter outbound;
+
+    auto enqueue_frame = [&](std::vector<std::uint8_t> frame) -> bool {
+        const ipc_v1::OutboundEnqueueResult result = outbound.enqueue(std::move(frame));
+        if (result == ipc_v1::OutboundEnqueueResult::Accepted) return true;
+        std::cerr << "network_service: IPC_V1_OUTBOUND_OVERFLOW result="
+                  << outbound_enqueue_name(result)
+                  << " queued_frames=" << outbound.queue().frame_count()
+                  << " queued_bytes=" << outbound.queue().queued_bytes()
+                  << " max_frames=" << outbound.queue().max_frames()
+                  << " max_bytes=" << outbound.queue().max_bytes() << std::endl;
+        return false;
+    };
+
+    auto flush_outbound = [&]() -> bool {
+        const ipc_v1::OutboundFlushResult result = outbound.flush(client_fd, wake_read_fd_);
+        if (result == ipc_v1::OutboundFlushResult::Drained) return true;
+        if (result == ipc_v1::OutboundFlushResult::SlowClient) {
+            std::cerr << "network_service: IPC_V1_OUTBOUND_WRITE_STALLED timeout_ms="
+                      << ipc_v1::kDefaultWriteStallTimeoutMs << std::endl;
+        } else if (result != ipc_v1::OutboundFlushResult::Interrupted) {
+            std::cerr << "network_service: IPC_V1_OUTBOUND_WRITE_FAILED result="
+                      << outbound_flush_name(result) << std::endl;
+        }
+        return false;
+    };
 
     auto process_frames = [&]() -> bool {
+        bool close_after_flush = false;
         while (decoder.has_frame()) {
             const ipc_v1::Frame frame = decoder.take_frame();
-            const ipc_v1::Session::HandleResult result = session.handle_frame(frame);
-            if (!result.response.empty() && !send_all(client_fd, result.response)) return false;
+            ipc_v1::Session::HandleResult result = session.handle_frame(frame);
+            if (!result.response.empty() && !enqueue_frame(std::move(result.response))) return false;
             if (result.server_action == ipc_v1::Session::ServerAction::EmitEventsSubscribed) {
-                const std::vector<std::uint8_t> event =
+                std::vector<std::uint8_t> event =
                     event_sequencer_.encode_event("network.events.subscribed", "{}");
-                if (event.empty() || !send_all(client_fd, event)) return false;
+                if (event.empty() || !enqueue_frame(std::move(event))) return false;
             } else if (result.server_action ==
                        ipc_v1::Session::ServerAction::SendAuthoritativeSnapshot) {
-                const std::vector<std::uint8_t> response = ipc_v1::encode_snapshot_response(
+                std::vector<std::uint8_t> response = ipc_v1::encode_snapshot_response(
                     result.action_request_id,
                     generation_,
                     event_sequencer_.last_sequence(),
                     daemon_.snapshot_result_json());
-                if (response.empty() || !send_all(client_fd, response)) return false;
+                if (response.empty() || !enqueue_frame(std::move(response))) return false;
             }
-            if (result.close_after_send) return false;
+            if (result.close_after_send) {
+                close_after_flush = true;
+                break;
+            }
         }
-        return true;
+        if (!flush_outbound()) return false;
+        return !close_after_flush;
     };
 
     if (decoder.feed(initial) == ipc_v1::DecodeStatus::Error) return;
