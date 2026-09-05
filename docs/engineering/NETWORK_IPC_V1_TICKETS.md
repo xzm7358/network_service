@@ -1,6 +1,6 @@
 # Network IPC v1 — Executable Tickets
 
-Status: Step 2.1 execution backlog
+Status: Step 2.1 first wire-contract tranche COMPLETE; event/reconnect/backpressure remain follow-up tranches.
 
 ## NS-IPC-101 — Freeze v1 wire contract
 
@@ -19,7 +19,7 @@ Status: Step 2.1 execution backlog
 
 ## NS-IPC-102 — Add first black-box protocol contract tests
 
-**Status**: DONE (first tranche behavior implemented; promotion to required CI remains NS-IPC-110)
+**Status**: DONE (promoted to required CI by NS-IPC-110)
 
 **Goal**: create an executable RED test tranche for the v1 session contract before server integration.
 
@@ -33,6 +33,7 @@ Status: Step 2.1 execution backlog
 - valid REQUEST after READY -> RESPONSE with same requestId
 - invalid v1 framing rejected after the connection is committed to v1
 - invalid version rejected
+- invalid message type rejected
 - non-zero reserved flags rejected
 - oversized payload rejected
 - partial frame delivery accepted when complete frame eventually arrives
@@ -40,7 +41,7 @@ Status: Step 2.1 execution backlog
 **Exit criteria**
 - Test is deterministic and uses only a temporary Unix socket/config directory.
 - Test can be run against a built `network_service` binary.
-- First-tranche protocol behavior is implemented; the full test remains non-required until NS-IPC-110 promotes the gate.
+- Full first-tranche protocol behavior is a required CI release gate.
 
 ---
 
@@ -192,7 +193,7 @@ Status: Step 2.1 execution backlog
 
 ## NS-IPC-110 — Promote v1 contract test to required CI
 
-**Status**: NEXT
+**Status**: DONE
 
 **Goal**: make v1 wire compatibility a product release gate.
 
@@ -200,11 +201,18 @@ Status: Step 2.1 execution backlog
 - NS-IPC-103 through NS-IPC-106 complete
 
 **Deliverables**
-- `.github/workflows/eep-ci.yml` invokes `tests/ipc_v1_contract_test.py`
+- audit `tests/ipc_v1_contract_test.py` against the frozen initial tranche
+- add invalid message-type coverage
+- exercise exact `UINT64_MAX` requestId correlation
+- `.github/workflows/eep-ci.yml` invokes the full contract test in strict-host CI
+- `.github/workflows/eep-ci.yml` invokes the full contract test under ASan/UBSan
+- keep v0/v1 coexistence and bounded v0 stalled-client regressions required
 
 **Exit criteria**
+- complete v1 wire contract gate green (10/10)
 - strict host build green
 - ASan/UBSan green
-- v0 regression green
-- v1 contract test green
+- v0/v1 coexistence regression green
+- v0 stalled-client regression green
+- governance green
 - static analysis green
