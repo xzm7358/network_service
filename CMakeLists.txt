@@ -13,6 +13,7 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/ipc/network_ipc_server.cpp
     src/ipc/network_ipc_v1_codec.cpp
     src/ipc/network_ipc_v1_event.cpp
+    src/ipc/network_ipc_v1_outbound.cpp
     src/ipc/network_ipc_v1_rebase.cpp
     src/ipc/network_ipc_v1_session.cpp
     src/platform/interface_snapshot.cpp
@@ -57,6 +58,15 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
     add_test(NAME network_ipc_v1_event COMMAND network_ipc_v1_event_test)
+
+    add_executable(network_ipc_v1_outbound_test
+        tests/network_ipc_v1_outbound_test.cpp
+        src/ipc/network_ipc_v1_outbound.cpp
+    )
+    target_include_directories(network_ipc_v1_outbound_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME network_ipc_v1_outbound COMMAND network_ipc_v1_outbound_test)
 
     add_executable(network_ipc_v1_rebase_test
         tests/network_ipc_v1_rebase_test.cpp
