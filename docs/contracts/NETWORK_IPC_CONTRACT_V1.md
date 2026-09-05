@@ -162,7 +162,7 @@ On the first successful subscription in a session, the server sends one control 
 
 The subscription REQUEST is idempotent within a session. Repeating it returns a successful RESPONSE but MUST NOT emit a second `network.events.subscribed` control EVENT for that same session.
 
-This initial control EVENT establishes executable generation/sequence semantics only. It is **not** an authoritative network-state snapshot and does not enable a continuous asynchronous state-change stream. Dynamic state EVENT production is promoted only together with the bounded outbound/backpressure rules owned by NS-IPC-109.
+This initial control EVENT establishes executable generation/sequence semantics only. It is **not** an authoritative network-state snapshot. Continuous dynamic state EVENT production remains a separate promotion decision even though the bounded outbound transport is now available.
 
 A sequence gap, generation change, or reconnect invalidates the consumer's incremental projection. The consumer MUST perform the authoritative snapshot rebase defined below before trusting incremental events again.
 
@@ -213,18 +213,22 @@ Rules:
 8. A forward sequence jump (`seq > lastAcceptedSeq + 1`) is a gap and MUST invalidate the baseline and trigger a new snapshot rebase.
 9. A reconnect always invalidates the previous session's projection even when READY reports the same server generation. A new session MUST establish a fresh snapshot baseline before relying on incremental delivery.
 
-The current NS-IPC-108 tranche keeps continuous unsolicited state EVENT production disabled, so no outbound EVENT queue is introduced here. When continuous EVENT delivery is promoted, the subscription/snapshot ordering MUST be paired with NS-IPC-109 queue/backpressure semantics so state changes cannot fall into an unobservable window around rebase.
-
 ## 8. Backpressure and bounds
 
-- Maximum payload: 64 KiB.
+- Maximum v1 payload: 64 KiB.
 - Readers MUST be bounded and interruptible.
-- A partial/stalled client MUST NOT block service shutdown indefinitely.
-- Implementations MUST bound queued outbound data; overload behavior must become explicit before continuous asynchronous EVENT delivery is enabled.
+- Every v1 connection MUST use a bounded outbound queue; an implementation MUST NOT accumulate unbounded RESPONSE/EVENT bytes for a slow client.
+- Queue accounting MUST bound both logical frame count and encoded bytes, and partial writes MUST reduce the accounted byte count exactly.
+- The current host-verifiable default ceiling is **32 queued frames** and **4 × maximum encoded v1 frame bytes**. These are implementation safety defaults, not real-target resource-budget evidence. Real-target evidence may tighten these values but MUST NOT remove boundedness.
+- Queue overflow MUST NOT silently drop an individual RESPONSE or EVENT. The session is terminated as overloaded; incremental delivery continuity is invalidated.
+- v1 socket writes MUST be non-blocking or otherwise deadline-bounded. The current implementation write-stall deadline is **1000 ms**.
+- A write stall or queue overflow terminates the v1 session. Recovery is a new connection followed by HELLO -> READY -> authoritative `network.snapshot` rebase before incremental EVENTs are trusted.
+- Service shutdown/wake MUST interrupt an outbound wait; a slow client MUST NOT indefinitely delay process termination.
+- Overload/slow-client termination MUST emit an explicit diagnostic suitable for regression evidence.
 
-NS-IPC-107 emits at most one synchronous `network.events.subscribed` control EVENT per session and does not introduce an outbound EVENT queue. NS-IPC-108 adds synchronous authoritative snapshot rebase only. Continuous/unsolicited event delivery remains disabled until NS-IPC-109 defines and verifies the bounded slow-client/backpressure policy.
+The v0 compatibility path is not redefined by this section; the existing bounded v0 stalled-client regression remains required during migration.
 
-The existing v0 stalled-client regression remains required during migration.
+The bounded writer makes future continuous EVENT delivery safe from unbounded outbound memory growth, but NS-IPC-109 by itself does **not** introduce a new dynamic network-state EVENT producer or remove the current single-client/serial accept-loop constraint.
 
 ## 9. Compatibility and protocol-selection rule
 
@@ -261,5 +265,6 @@ The executable contract currently freezes these invariants:
 11. first event subscription produces an EVENT whose generation matches READY and whose server-owned sequence is monotonic within the generation.
 12. reconnect snapshot rebase returns READY generation plus a sequence watermark and authoritative snapshot.
 13. generation changes, sequence gaps, stale EVENTs, and exact-next EVENTs have deterministic rebase-state decisions.
+14. outbound queue frame/byte bounds, partial-send accounting, write-stall deadline, wake interruption, and reconnect/rebase recovery are executable regressions.
 
-Continuous dynamic event delivery, multi-outstanding request concurrency, and explicit outbound-backpressure behavior remain subsequent tranches.
+Multi-outstanding request concurrency, production SmartControl migration, dynamic network-state EVENT production, and real-target resource/HIL evidence remain subsequent work.
