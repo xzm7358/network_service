@@ -4,6 +4,8 @@ Status: Step 2.1 execution backlog
 
 ## NS-IPC-101 — Freeze v1 wire contract
 
+**Status**: DONE
+
 **Goal**: freeze transport, framing, negotiation, request correlation, event sequencing, reconnect, and compatibility semantics.
 
 **Deliverables**
@@ -16,6 +18,8 @@ Status: Step 2.1 execution backlog
 ---
 
 ## NS-IPC-102 — Add first black-box protocol contract tests
+
+**Status**: DONE (RED tranche retained until request correlation lands)
 
 **Goal**: create an executable RED test tranche for the v1 session contract before server integration.
 
@@ -36,11 +40,13 @@ Status: Step 2.1 execution backlog
 **Exit criteria**
 - Test is deterministic and uses only a temporary Unix socket/config directory.
 - Test can be run against a built `network_service` binary.
-- Until NS-IPC-104 is implemented, this test is expected RED and is not yet a required CI gate.
+- Until NS-IPC-105 is implemented, request correlation remains expected RED and the full test is not yet a required CI gate.
 
 ---
 
 ## NS-IPC-103 — Introduce v1 protocol codec boundary
+
+**Status**: DONE
 
 **Goal**: remove framing/parsing responsibility from `NetworkIpcServer`.
 
@@ -63,6 +69,8 @@ Status: Step 2.1 execution backlog
 
 ## NS-IPC-104 — Integrate HELLO / READY session state
 
+**Status**: DONE
+
 **Goal**: make socket readiness semantic rather than process/socket existence.
 
 **Deliverables**
@@ -70,14 +78,22 @@ Status: Step 2.1 execution backlog
 - HELLO version-range validation
 - READY response with sessionId/generation
 - reject REQUEST before READY
+- black-box session negotiation regression
 
 **Exit criteria**
-- first tranche negotiation tests green
-- stalled-client regression remains green
+- negotiation unit/integration tests green
+- strict build and sanitizer runs green
+- stalled-client v0 regression remains green
+- static analysis green
+
+**Known follow-up constraint**
+- The current server accept loop remains single-client/serial and the accepted-client read path still inherits the bounded idle timeout introduced for v0 safety. This is acceptable for the Step 2.1 handshake tranche but MUST be revisited before EVENT delivery/long-lived production sessions are promoted.
 
 ---
 
 ## NS-IPC-105 — Add requestId correlation
+
+**Status**: NEXT
 
 **Goal**: v1 REQUEST/RESPONSE correlation independent of response ordering.
 
