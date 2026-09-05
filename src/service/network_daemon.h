@@ -19,6 +19,7 @@ public:
     ~NetworkDaemon();
 
     NetworkSnapshot snapshot() const;
+    std::string snapshot_result_json() const;
     std::string snapshot_json() const;
     std::string ping_json() const;
     std::string wpa_events_json() const;

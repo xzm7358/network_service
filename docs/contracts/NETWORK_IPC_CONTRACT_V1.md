@@ -65,7 +65,7 @@ After successful negotiation the server sends READY:
   "service": "network_service",
   "sessionId": "opaque-session-id",
   "generation": 1,
-  "capabilities": ["request-response", "events"]
+  "capabilities": ["request-response", "events", "snapshot-rebase"]
 }
 ```
 
@@ -164,16 +164,56 @@ The subscription REQUEST is idempotent within a session. Repeating it returns a 
 
 This initial control EVENT establishes executable generation/sequence semantics only. It is **not** an authoritative network-state snapshot and does not enable a continuous asynchronous state-change stream. Dynamic state EVENT production is promoted only together with the bounded outbound/backpressure rules owned by NS-IPC-109.
 
-A sequence gap, generation change, or reconnect invalidates the consumer's incremental projection. The consumer MUST obtain an authoritative snapshot and then consume only events newer than the rebased point. The actual snapshot-rebase flow remains NS-IPC-108.
+A sequence gap, generation change, or reconnect invalidates the consumer's incremental projection. The consumer MUST perform the authoritative snapshot rebase defined below before trusting incremental events again.
 
-## 7. Reconnect semantics
+## 7. Reconnect and authoritative snapshot rebase
 
 - A transport disconnect terminates the session and all outstanding requests.
 - `sessionId` is not reusable across server restart/reconnect.
 - After reconnect the client performs HELLO -> READY again.
 - Event subscription is session-scoped and MUST be repeated after reconnect.
-- State reconciliation is authoritative snapshot rebase, then newer events.
-- Clients MUST NOT assume event delivery continuity across sessions.
+- Reconnect, generation change, or EVENT sequence gap invalidates the current incremental projection.
+- An invalidated consumer MUST obtain a fresh authoritative snapshot before incremental EVENTs are trusted again.
+
+### 7.1 `network.snapshot`
+
+After READY, the client requests an authoritative rebase point with:
+
+```json
+{
+  "requestId": 200,
+  "method": "network.snapshot",
+  "params": {}
+}
+```
+
+Successful RESPONSE:
+
+```json
+{
+  "requestId": 200,
+  "status": 200,
+  "result": {
+    "generation": 1,
+    "snapshotSeq": 7,
+    "snapshot": {}
+  }
+}
+```
+
+Rules:
+
+1. `result.generation` MUST equal the server generation advertised by READY for that session.
+2. `snapshot` is the authoritative live NetworkService snapshot captured for the rebase.
+3. `snapshotSeq` is the last EVENT sequence successfully allocated in that generation at the snapshot rebase point. It is `0` when the generation has not emitted any EVENT yet.
+4. The tuple `(generation, snapshotSeq, snapshot)` establishes the consumer's new baseline.
+5. EVENTs from a different generation MUST invalidate the baseline and require another snapshot rebase.
+6. EVENTs with `seq <= snapshotSeq` are stale/already covered by the authoritative baseline and MUST NOT advance the projection.
+7. The first accepted incremental EVENT after a baseline MUST have `seq == snapshotSeq + 1`; every later accepted EVENT MUST likewise be exactly the next sequence.
+8. A forward sequence jump (`seq > lastAcceptedSeq + 1`) is a gap and MUST invalidate the baseline and trigger a new snapshot rebase.
+9. A reconnect always invalidates the previous session's projection even when READY reports the same server generation. A new session MUST establish a fresh snapshot baseline before relying on incremental delivery.
+
+The current NS-IPC-108 tranche keeps continuous unsolicited state EVENT production disabled, so no outbound EVENT queue is introduced here. When continuous EVENT delivery is promoted, the subscription/snapshot ordering MUST be paired with NS-IPC-109 queue/backpressure semantics so state changes cannot fall into an unobservable window around rebase.
 
 ## 8. Backpressure and bounds
 
@@ -182,7 +222,7 @@ A sequence gap, generation change, or reconnect invalidates the consumer's incre
 - A partial/stalled client MUST NOT block service shutdown indefinitely.
 - Implementations MUST bound queued outbound data; overload behavior must become explicit before continuous asynchronous EVENT delivery is enabled.
 
-NS-IPC-107 emits at most one synchronous `network.events.subscribed` control EVENT per session and does not introduce an outbound EVENT queue. Continuous/unsolicited event delivery remains disabled until NS-IPC-109 defines and verifies the bounded slow-client/backpressure policy.
+NS-IPC-107 emits at most one synchronous `network.events.subscribed` control EVENT per session and does not introduce an outbound EVENT queue. NS-IPC-108 adds synchronous authoritative snapshot rebase only. Continuous/unsolicited event delivery remains disabled until NS-IPC-109 defines and verifies the bounded slow-client/backpressure policy.
 
 The existing v0 stalled-client regression remains required during migration.
 
@@ -204,9 +244,9 @@ Migration rules:
 - `tools/networkctl.py` remains intentionally v0 during this bounded migration window and serves as a compatibility sentinel; it MUST NOT silently auto-negotiate or fall back between protocols.
 - v0 removal requires consumer migration, CI evidence, and real-target restart/reconnect evidence.
 
-## 10. Initial contract-test tranche
+## 10. Executable contract tranches
 
-The first executable tranche freezes these invariants:
+The executable contract currently freezes these invariants:
 
 1. 12-byte `NSP1` header encoding/decoding.
 2. Big-endian payload length.
@@ -219,5 +259,7 @@ The first executable tranche freezes these invariants:
 9. invalid magic/version/type/flags never reaches command dispatch.
 10. valid v0 and valid v1 traffic remain disjoint under the frozen four-octet protocol selector.
 11. first event subscription produces an EVENT whose generation matches READY and whose server-owned sequence is monotonic within the generation.
+12. reconnect snapshot rebase returns READY generation plus a sequence watermark and authoritative snapshot.
+13. generation changes, sequence gaps, stale EVENTs, and exact-next EVENTs have deterministic rebase-state decisions.
 
-Authoritative snapshot rebase, continuous dynamic event delivery, multi-outstanding request concurrency, and explicit outbound-backpressure behavior remain subsequent tranches.
+Continuous dynamic event delivery, multi-outstanding request concurrency, and explicit outbound-backpressure behavior remain subsequent tranches.

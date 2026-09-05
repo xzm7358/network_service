@@ -419,7 +419,7 @@ Session::HandleResult Session::ready_result() {
     std::ostringstream os;
     os << "{\"version\":1,\"service\":\"network_service\",\"sessionId\":\""
        << session_id_ << "\",\"generation\":" << generation_
-       << ",\"capabilities\":[\"request-response\",\"events\"]}";
+       << ",\"capabilities\":[\"request-response\",\"events\",\"snapshot-rebase\"]}";
     return {encode_json(MessageType::Ready, os.str()), false};
 }
 
@@ -464,6 +464,13 @@ Session::HandleResult Session::handle_request(const std::string &payload) {
         return response_success(
             request.request_id,
             "{\"service\":\"network_service\",\"protocolVersion\":1}");
+    }
+
+    if (request.method == "network.snapshot") {
+        HandleResult result;
+        result.server_action = ServerAction::SendAuthoritativeSnapshot;
+        result.action_request_id = request.request_id;
+        return result;
     }
 
     if (request.method == "network.events.subscribe") {

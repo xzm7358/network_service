@@ -85,8 +85,12 @@ NetworkSnapshot NetworkDaemon::snapshot() const {
     return read_live_snapshot(eth_iface_.c_str(), wifi_iface_.c_str());
 }
 
+std::string NetworkDaemon::snapshot_result_json() const {
+    return snapshot_to_json(snapshot());
+}
+
 std::string NetworkDaemon::snapshot_json() const {
-    return ok_json(snapshot_to_json(snapshot()));
+    return ok_json(snapshot_result_json());
 }
 
 std::string NetworkDaemon::ping_json() const {

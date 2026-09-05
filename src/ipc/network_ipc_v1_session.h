@@ -21,12 +21,14 @@ public:
     enum class ServerAction {
         None = 0,
         EmitEventsSubscribed,
+        SendAuthoritativeSnapshot,
     };
 
     struct HandleResult {
         std::vector<std::uint8_t> response;
         bool close_after_send = false;
         ServerAction server_action = ServerAction::None;
+        std::uint64_t action_request_id = 0;
     };
 
     Session(std::uint64_t generation, std::string session_id);
