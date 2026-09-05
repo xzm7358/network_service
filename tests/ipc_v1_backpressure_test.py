@@ -120,6 +120,8 @@ def generate_pressure(sock: socket.socket, duration: float = 1.2):
             offset += written
         except (BlockingIOError, InterruptedError):
             time.sleep(0.001)
+        except (BrokenPipeError, ConnectionResetError):
+            break
     return offset
 
 
