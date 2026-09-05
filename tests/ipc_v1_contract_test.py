@@ -199,8 +199,6 @@ def test_partial_frame_delivery(path: Path):
         "capabilities": [],
     })
     with connect(path) as sock:
-        for cut in (3, HEADER.size, len(frame)):
-            pass
         sock.sendall(frame[:3])
         time.sleep(0.01)
         sock.sendall(frame[3:HEADER.size])
