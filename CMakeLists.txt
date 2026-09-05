@@ -12,6 +12,7 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/service/network_daemon.cpp
     src/ipc/network_ipc_server.cpp
     src/ipc/network_ipc_v1_codec.cpp
+    src/ipc/network_ipc_v1_session.cpp
     src/platform/interface_snapshot.cpp
     src/config/ethernet_config.cpp
     src/platform/ethernet_apply.cpp
@@ -44,6 +45,16 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
     add_test(NAME network_ipc_v1_codec COMMAND network_ipc_v1_codec_test)
+
+    add_executable(network_ipc_v1_session_test
+        tests/network_ipc_v1_session_test.cpp
+        src/ipc/network_ipc_v1_session.cpp
+        src/ipc/network_ipc_v1_codec.cpp
+    )
+    target_include_directories(network_ipc_v1_session_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME network_ipc_v1_session COMMAND network_ipc_v1_session_test)
 endif()
 
 install(TARGETS ${NETWORK_SERVICE_TARGET}
