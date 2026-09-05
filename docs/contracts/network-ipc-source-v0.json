@@ -1,0 +1,55 @@
+{
+  "contractId": "NETWORKSERVICE-PRODUCT-IPC-SOURCE-V0",
+  "version": "0.1.0",
+  "status": "frozen-brownfield-source",
+  "implementationBaseline": {
+    "repository": "xzm7358/network_service",
+    "commit": "0b415f57c9bf2519645099513f7b73c18a174e8b"
+  },
+  "transport": {
+    "kind": "unix-stream-socket",
+    "defaultPath": "/tmp/smart_hmi_network.sock",
+    "socketModeObserved": "0666",
+    "connectionModel": "one-request-one-response-per-accepted-connection"
+  },
+  "framing": {
+    "requestTerminator": "newline",
+    "responseTerminator": "newline",
+    "observedRequestLimitBytes": 65536,
+    "lengthPrefix": false
+  },
+  "request": {
+    "encoding": "utf-8-json-object",
+    "methodField": "method",
+    "requestId": false,
+    "protocolVersionField": false
+  },
+  "response": {
+    "successShape": {"status": 200, "result": "any-json"},
+    "errorShape": {"status": "integer", "error": "string"}
+  },
+  "implementedMethods": [
+    "network.ping",
+    "network.snapshot",
+    "eth.get_config",
+    "eth.set_dhcp",
+    "eth.set_static",
+    "wpa.events",
+    "wifi.scan",
+    "wifi.set_enabled",
+    "wifi.connect",
+    "wifi.connect_saved",
+    "wifi.saved_list",
+    "wifi.forget",
+    "wifi.autoconnect",
+    "wifi.disconnect"
+  ],
+  "declaredButNotImplementedMethods": ["network.subscribe"],
+  "compatibilityNotes": [
+    "An empty or missing method currently falls back to network.snapshot.",
+    "There is no hello/version negotiation or semantic READY session.",
+    "There is no requestId correlation.",
+    "There is no event sequence/generation or reconnect reconciliation protocol.",
+    "The protocol is not compatible with EEP Network IPC v1 without a migration layer or coordinated breaking change."
+  ]
+}

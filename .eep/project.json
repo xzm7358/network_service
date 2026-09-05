@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1",
+  "projectId": "network-service",
+  "name": "NetworkService",
+  "adoptionMode": "brownfield",
+  "profile": "embedded-linux",
+  "serviceProfile": "process",
+  "uiProfile": "none",
+  "contractProfile": "ipc",
+  "baselineRepository": "xzm7358/network_service",
+  "baselineCommit": "0b415f57c9bf2519645099513f7b73c18a174e8b",
+  "platformRelease": "1.20.0",
+  "status": "ADOPTED_PENDING_VERIFICATION"
+}

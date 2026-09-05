@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1",
+  "status": "ACTIVE",
+  "deviations": [
+    {
+      "id": "NET-BROWNFIELD-001",
+      "rule": "CONTRACT/IPC",
+      "severity": "P1",
+      "reason": "The current product IPC uses newline-delimited JSON and differs materially from platform Network IPC v1 framing/version/readiness/request-correlation semantics.",
+      "compensatingControl": "Freeze network-ipc-source-v0 and block claims of Network IPC v1 compatibility until the governed migration completes.",
+      "owner": "NetworkService",
+      "reviewRequired": true
+    },
+    {
+      "id": "NET-BROWNFIELD-002",
+      "rule": "CPP-CMAKE/BOUNDARY",
+      "severity": "P2",
+      "reason": "The standalone repository still emits the runtime binary into an app/smartcontrol product path from its CMake target.",
+      "compensatingControl": "Keep the behavior unchanged in the adoption-only change; move product placement into packaging/integration in a dedicated follow-up change.",
+      "owner": "NetworkService",
+      "reviewRequired": true
+    }
+  ]
+}
