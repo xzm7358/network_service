@@ -32,6 +32,12 @@ public:
 private:
     HandleResult error_result(const char *code, const char *message, bool close_after_send);
     HandleResult ready_result();
+    HandleResult response_success(std::uint64_t request_id, const std::string &result_json);
+    HandleResult response_error(std::uint64_t request_id,
+                                int status,
+                                const char *code,
+                                const char *message);
+    HandleResult handle_request(const std::string &payload);
 
     std::uint64_t generation_;
     std::string session_id_;
