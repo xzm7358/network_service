@@ -48,13 +48,13 @@ Status: Step 2.1 execution backlog
 
 **Status**: DONE
 
-**Goal**: remove framing/parsing responsibility from `NetworkIpcServer`.
+**Goal**: remove binary framing responsibility from `NetworkIpcServer`.
 
 **Deliverables**
 - `src/ipc/network_ipc_v1_codec.{h,cpp}`
 - frame header encode/decode
-- bounded payload reader
-- JSON payload validation boundary
+- bounded payload accumulation
+- frame-level validation boundary
 
 **Constraints**
 - no NetworkDaemon business behavior change
@@ -75,7 +75,7 @@ Status: Step 2.1 execution backlog
 
 **Deliverables**
 - per-connection session state
-- HELLO version-range validation
+- HELLO JSON validation and version-range validation
 - READY response with sessionId/generation
 - reject REQUEST before READY
 - black-box session negotiation regression
