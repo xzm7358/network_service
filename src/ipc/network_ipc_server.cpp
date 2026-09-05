@@ -1,18 +1,23 @@
 #include "ipc/network_ipc_server.h"
 
+#include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <iostream>
 #include <poll.h>
+#include <sstream>
 #include <string>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
+#include "ipc/network_ipc_v1_codec.h"
+#include "ipc/network_ipc_v1_session.h"
 #include "network_service_protocol.h"
 #include "service/network_daemon.h"
 
@@ -23,6 +28,14 @@ namespace {
 static int g_wake_fd = -1;
 constexpr int kClientIdleTimeoutMs = 1000;
 constexpr size_t kMaxRequestBytes = 64 * 1024;
+constexpr std::uint8_t kV1Magic[4] = {'N', 'S', 'P', '1'};
+
+static std::uint64_t make_server_generation() {
+    const auto now = std::chrono::system_clock::now().time_since_epoch().count();
+    std::uint64_t generation = static_cast<std::uint64_t>(now);
+    generation ^= static_cast<std::uint64_t>(static_cast<unsigned long>(getpid())) << 32;
+    return generation == 0 ? 1 : generation;
+}
 
 static std::string json_unescape(const std::string &value) {
     std::string out;
@@ -81,11 +94,15 @@ static std::string extract_method(const std::string &request) {
     return extract_json_string(request, "method");
 }
 
-static bool send_all(int fd, const std::string &data) {
-    const char *p = data.data();
-    size_t remaining = data.size();
+static bool send_all_bytes(int fd, const std::uint8_t *data, size_t size) {
+    const std::uint8_t *p = data;
+    size_t remaining = size;
     while (remaining > 0) {
-        ssize_t written = send(fd, p, remaining, 0);
+#ifdef MSG_NOSIGNAL
+        const ssize_t written = send(fd, p, remaining, MSG_NOSIGNAL);
+#else
+        const ssize_t written = send(fd, p, remaining, 0);
+#endif
         if (written < 0) {
             if (errno == EINTR) continue;
             return false;
@@ -97,10 +114,26 @@ static bool send_all(int fd, const std::string &data) {
     return true;
 }
 
+static bool send_all(int fd, const std::string &data) {
+    return send_all_bytes(fd,
+                          reinterpret_cast<const std::uint8_t *>(data.data()),
+                          data.size());
+}
+
+static bool send_all(int fd, const std::vector<std::uint8_t> &data) {
+    return data.empty() || send_all_bytes(fd, data.data(), data.size());
+}
+
+static bool starts_with_v1_magic(const std::vector<std::uint8_t> &data) {
+    return data.size() >= sizeof(kV1Magic) &&
+           std::equal(kV1Magic, kV1Magic + sizeof(kV1Magic), data.begin());
+}
+
 } // namespace
 
 NetworkIpcServer::NetworkIpcServer(NetworkDaemon &daemon)
-    : daemon_(daemon) {
+    : daemon_(daemon),
+      generation_(make_server_generation()) {
     int pipefd[2] = {-1, -1};
     if (pipe(pipefd) == 0) {
         wake_read_fd_ = pipefd[0];
@@ -289,7 +322,112 @@ std::string NetworkIpcServer::handle_request(const std::string &request) {
 }
 
 void NetworkIpcServer::handle_client(int client_fd) {
-    std::string request;
+    std::vector<std::uint8_t> initial;
+    char buffer[1024];
+
+    while (initial.size() < sizeof(kV1Magic)) {
+        struct pollfd fds[2];
+        fds[0].fd = client_fd;
+        fds[0].events = POLLIN;
+        fds[0].revents = 0;
+        nfds_t poll_count = 1;
+        if (wake_read_fd_ >= 0) {
+            fds[1].fd = wake_read_fd_;
+            fds[1].events = POLLIN;
+            fds[1].revents = 0;
+            poll_count = 2;
+        }
+
+        const int ret = poll(fds, poll_count, kClientIdleTimeoutMs);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            return;
+        }
+        if (ret == 0) return;
+        if (poll_count > 1 && (fds[1].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL))) return;
+        if (fds[0].revents & (POLLERR | POLLNVAL)) return;
+        if (!(fds[0].revents & (POLLIN | POLLHUP))) continue;
+
+        const ssize_t n = recv(client_fd, buffer, sizeof(buffer), 0);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return;
+        }
+        if (n == 0) break;
+        initial.insert(initial.end(),
+                       reinterpret_cast<const std::uint8_t *>(buffer),
+                       reinterpret_cast<const std::uint8_t *>(buffer) + n);
+        if (initial.size() > kMaxRequestBytes) return;
+        if (std::find(initial.begin(), initial.end(), static_cast<std::uint8_t>('\n')) != initial.end()) break;
+    }
+
+    if (starts_with_v1_magic(initial)) {
+        handle_v1_client(client_fd, initial);
+    } else {
+        handle_v0_client(client_fd, initial);
+    }
+}
+
+void NetworkIpcServer::handle_v0_client(int client_fd, const std::vector<std::uint8_t> &initial) {
+    std::string request(initial.begin(), initial.end());
+    char buffer[1024];
+
+    while (request.find('\n') == std::string::npos) {
+        struct pollfd fds[2];
+        fds[0].fd = client_fd;
+        fds[0].events = POLLIN;
+        fds[0].revents = 0;
+        nfds_t poll_count = 1;
+        if (wake_read_fd_ >= 0) {
+            fds[1].fd = wake_read_fd_;
+            fds[1].events = POLLIN;
+            fds[1].revents = 0;
+            poll_count = 2;
+        }
+
+        const int ret = poll(fds, poll_count, kClientIdleTimeoutMs);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            return;
+        }
+        if (ret == 0) return;
+        if (poll_count > 1 && (fds[1].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL))) return;
+        if (fds[0].revents & (POLLERR | POLLNVAL)) return;
+        if (!(fds[0].revents & (POLLIN | POLLHUP))) continue;
+
+        const ssize_t n = recv(client_fd, buffer, sizeof(buffer), 0);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return;
+        }
+        if (n == 0) break;
+        request.append(buffer, static_cast<size_t>(n));
+        if (request.size() > kMaxRequestBytes) return;
+    }
+
+    const std::string response = handle_request(request);
+    (void)send_all(client_fd, response);
+}
+
+void NetworkIpcServer::handle_v1_client(int client_fd, const std::vector<std::uint8_t> &initial) {
+    std::ostringstream session_id;
+    session_id << "ns-" << generation_ << '-' << next_session_sequence_++;
+    ipc_v1::Session session(generation_, session_id.str());
+    ipc_v1::FrameDecoder decoder;
+
+    auto process_frames = [&]() -> bool {
+        while (decoder.has_frame()) {
+            const ipc_v1::Frame frame = decoder.take_frame();
+            const ipc_v1::Session::HandleResult result = session.handle_frame(frame);
+            if (!result.response.empty() && !send_all(client_fd, result.response)) return false;
+            if (result.close_after_send) return false;
+        }
+        return true;
+    };
+
+    if (decoder.feed(initial) == ipc_v1::DecodeStatus::Error) return;
+    if (!process_frames()) return;
+
     char buffer[1024];
     while (true) {
         struct pollfd fds[2];
@@ -304,40 +442,27 @@ void NetworkIpcServer::handle_client(int client_fd) {
             poll_count = 2;
         }
 
-        int ret = poll(fds, poll_count, kClientIdleTimeoutMs);
+        const int ret = poll(fds, poll_count, kClientIdleTimeoutMs);
         if (ret < 0) {
             if (errno == EINTR) continue;
             return;
         }
-        if (ret == 0) {
-            return;
-        }
-        if (poll_count > 1 && (fds[1].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL))) {
-            return;
-        }
-        if (fds[0].revents & (POLLERR | POLLNVAL)) {
-            return;
-        }
-        if (!(fds[0].revents & (POLLIN | POLLHUP))) {
-            continue;
-        }
+        if (ret == 0) return;
+        if (poll_count > 1 && (fds[1].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL))) return;
+        if (fds[0].revents & (POLLERR | POLLNVAL)) return;
+        if (!(fds[0].revents & (POLLIN | POLLHUP))) continue;
 
-        ssize_t n = recv(client_fd, buffer, sizeof(buffer), 0);
+        const ssize_t n = recv(client_fd, buffer, sizeof(buffer), 0);
         if (n < 0) {
             if (errno == EINTR) continue;
             return;
         }
-        if (n == 0) break;
-        request.append(buffer, static_cast<size_t>(n));
-        if (request.size() > kMaxRequestBytes) {
-            return;
-        }
-        if (request.find('\n') != std::string::npos) {
-            break;
-        }
+        if (n == 0) return;
+
+        const auto *bytes = reinterpret_cast<const std::uint8_t *>(buffer);
+        if (decoder.feed(bytes, static_cast<size_t>(n)) == ipc_v1::DecodeStatus::Error) return;
+        if (!process_frames()) return;
     }
-    std::string response = handle_request(request);
-    (void)send_all(client_fd, response);
 }
 
 } // namespace network_service
