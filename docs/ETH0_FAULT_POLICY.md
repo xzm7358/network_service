@@ -1,38 +1,45 @@
 # eth0 Fault Handling Policy
 
-`eth0` is treated as the protected management link.
+`eth0` is the protected management link.
 
-## Phase 1: observe/adopt only
+## Startup / automatic recovery
 
-When NetworkService starts, it may start after Linux init scripts, `desktop`, MQTT, or telnet have already used `eth0`. Therefore it must adopt the live state and must not perform disruptive recovery.
+When NetworkService starts, it may start after Linux init scripts, `desktop`, MQTT, telnet, HTTP or OTA have already used `eth0`. Startup therefore adopts live state and must not perform disruptive repair merely because the daemon has started.
 
-Allowed:
+Without an explicit apply request or a separately reviewed policy decision, NetworkService must not:
 
-- Read `eth0` carrier state.
-- Read IPv4 address and netmask.
-- Read default route and metric.
-- Read DNS state.
-- Report degraded state in `network.snapshot`.
+- restart `udhcpc` for an already configured management link;
+- flush the existing `eth0` address;
+- delete connected/default routes;
+- rewrite DNS;
+- repair route/DNS state automatically.
 
-Forbidden:
+The daemon may always observe and report carrier, address, route and DNS state.
 
-- Restart `udhcpc` when `eth0` already has an IPv4 address.
-- Flush `eth0` address automatically.
-- Delete `eth0` connected routes automatically.
-- Rewrite DNS automatically.
-- Repair default route automatically.
+## Explicit apply operations
 
-## Later phases
+The current implementation already supports explicit mutation paths including:
 
-Explicit operations may be added later:
+- `eth.set_static`;
+- `eth.set_dhcp`;
+- Wi-Fi enable/connect/disconnect and DHCP operations.
 
-- `eth.set_static`
-- `eth.set_dhcp`
-- `route.apply`
-- `dns.apply`
+These operations may invoke platform mechanisms such as `udhcpc`, `ifconfig`, `route`, `wpa_cli` and `/etc/resolv.conf` **inside the NetworkService platform/backend layer**.
 
-Those operations must be user-initiated or policy-initiated with clear ownership and idempotent route/DNS implementation.
+This does not authorize other product processes to mutate networking directly. NetworkService remains the intended network-control owner.
+
+## Policy requirement
+
+Any future automatic repair policy must define:
+
+1. state authority;
+2. idempotency;
+3. readiness criteria;
+4. retry/timeout behavior;
+5. route/DNS conflict handling;
+6. recovery from daemon restart or event gaps;
+7. target regression evidence proving that the management link is not disrupted.
 
 ## Reason
 
-A background DHCP restart can run a `deconfig` script, temporarily set `eth0` to `0.0.0.0`, remove default routes, and break telnet, MQTT, HTTP, or OTA. That is not acceptable for a wall panel management link.
+A background DHCP restart can execute a `deconfig` path, temporarily clear the interface address, replace routes or DNS, and break telnet, MQTT, HTTP or OTA. Explicit user/policy intent and regression evidence are therefore required before disruptive repair is allowed.

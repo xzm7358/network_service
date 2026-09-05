@@ -2,18 +2,18 @@
 
 `NetworkService` is the standalone network owner for the embedded Linux control panel.
 
-## Phase 1 Scope
+## Current Scope
 
-This first migration phase is intentionally observe-only:
+The daemon starts in **adopt-first / explicit-apply** mode:
 
-- Provides a Unix domain socket server.
-- Supports `network.ping`.
-- Supports `network.snapshot`.
-- Reads live `eth0` / `wlan0` state.
-- Does not start or stop `udhcpc`.
-- Does not call `ifconfig`, `ip`, `route`, `wpa_cli`, or edit `/etc/resolv.conf`.
+- starts a Unix domain socket server;
+- exposes live `eth0` / `wlan0` snapshots;
+- observes WPA events;
+- supports explicit Ethernet DHCP/static apply operations;
+- supports explicit Wi-Fi enable/scan/connect/connect-saved/disconnect/forget/autoconnect operations;
+- owns the backend code that invokes `wpa_cli`, `udhcpc`, `ifconfig`, route mutation and DNS writes for those explicit operations.
 
-This is deliberate. `desktop` currently starts after the system already has a live network. A late-starting daemon must adopt live state first, not reconfigure `eth0`.
+Startup itself must not perform disruptive automatic recovery of an already-live management link. Network mutation is performed only through explicit NetworkService operations until a separately reviewed policy layer is introduced.
 
 ## IPC
 
@@ -23,7 +23,12 @@ Default socket:
 /tmp/smart_hmi_network.sock
 ```
 
-Request examples:
+The **current production source contract is v0**, using one newline-delimited JSON request and one JSON-line response per accepted connection. It is frozen at:
+
+- `docs/contracts/network-ipc-source-v0.json`
+- `docs/contracts/NETWORK_IPC_SOURCE_CONTRACT_V0.md`
+
+Examples:
 
 ```json
 {"method":"network.ping"}
@@ -33,26 +38,31 @@ Request examples:
 {"method":"network.snapshot"}
 ```
 
-Each request is newline-delimited. The response is a single JSON line.
+The platform Network IPC v1 contract is intentionally **not** claimed as implemented yet. The governed migration is documented in:
 
-## eth0 Fault Handling Policy
+`docs/migrations/NETWORK_IPC_V1_MIGRATION_PLAN.md`.
 
-`eth0` is the management link. Until Ethernet control is fully migrated into this daemon, fault handling follows these rules:
+## EEP Brownfield Adoption
 
-1. If `eth0` has an IP address, NetworkService must not restart DHCP.
-2. If `eth0` has an IP address, NetworkService must not flush the address.
-3. If `eth0` has an IP address, NetworkService must not delete connected routes.
-4. Missing default route is observed and reported, not repaired in Phase 1.
-5. Missing DNS is observed and reported, not repaired in Phase 1.
-6. Static/DHCP switching requires an explicit future IPC command and UI confirmation.
-7. Automatic repair may only be enabled later after route/DNS operations are made idempotent and tested.
+This repository adopts Embedded Engineering Platform release `1.20.0` in brownfield mode. Machine-readable adoption metadata lives in `.eep/`.
 
-## Migration Priority
+The first adoption phase changes governance, documentation and CI only. It does not intentionally change runtime networking behavior.
 
-1. Create standalone daemon and IPC protocol.
-2. Add `smartcontrol` client and switch UI reads to `network.snapshot`.
-3. Move Ethernet configuration persistence to NetworkService.
-4. Move explicit Ethernet apply actions to NetworkService.
-5. Move Wi-Fi scan/connect/disconnect to NetworkService.
-6. Move route/DNS policy ownership to NetworkService.
-7. Remove direct network HAL usage from `desktop`.
+## eth0 Fault Handling
+
+`eth0` remains the protected management link. See `docs/ETH0_FAULT_POLICY.md`.
+
+The key distinction is:
+
+- **automatic/startup recovery** must not disrupt an already-live link;
+- **explicit apply commands** may perform DHCP/static/route/DNS mutation through NetworkService.
+
+## Migration Priorities
+
+1. Freeze the current production IPC source contract.
+2. Adopt EEP metadata and product-owned CI.
+3. Reconcile documentation with executable behavior.
+4. Migrate the newline-delimited IPC to governed Network IPC v1.
+5. Add product contract/regression tests.
+6. Run NetworkService on the real wall-panel target and collect resource/HIL evidence.
+7. Remove remaining direct network mutation paths from other product processes.

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1",
+  "platformRelease": "1.20.0",
+  "status": "ADOPTED_PENDING_VERIFICATION",
+  "assets": [
+    {"priority":"P1","assetId":"STD-ARCH-001","version":"1.1.0","maturity":"L3","manifestSha256":"1dd7ff88b62343422729aa7e81b3bd83bf81a6e2f2843c4a453bad846fb7b5ff"},
+    {"priority":"P2","assetId":"STD-CPP-001","version":"1.2.0","maturity":"L3","manifestSha256":"0fe86dcf9e32a9da5e149fa9926f22435834e80553a794a6c33340b9004d64a8"},
+    {"priority":"P3","assetId":"STD-CONTRACT-001","version":"1.2.0","maturity":"L3","manifestSha256":"f1ee048e2c7d0252c160adbcfd5ae4d22dc3fc09ac5e972c8446fe1a24bb67f4"},
+    {"priority":"P4","assetId":"PAT-SVC-001","version":"1.1.0","maturity":"L3","manifestSha256":"897eb20ea90e9ce46c4848c0ebba911e42cddcf18e4e70fcd2f0f9294382bac2"},
+    {"priority":"P8","assetId":"HARNESS-VERIFY-001","version":"1.5.0-draft","maturity":"L3","manifestSha256":"37622f67e7d6b5e45ef6ab06560de259e408ff7bf96d2c40b03dcdb33afc4626"},
+    {"priority":"P9","assetId":"AI-SYS-001","version":"1.3.0-draft","maturity":"L3","manifestSha256":"1bc089ef50b94857dc24167606bd908dd382a5e850c71647d48c805a89f1128a"}
+  ]
+}

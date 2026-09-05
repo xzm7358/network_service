@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "1",
+  "adoptionId": "network-service-eep-1.20.0",
+  "platformRelease": "1.20.0",
+  "baselineRepository": "xzm7358/network_service",
+  "baselineCommit": "0b415f57c9bf2519645099513f7b73c18a174e8b",
+  "documents": {
+    ".eep/project.json": "bdd7891059a5cb122646d937e67864f4299f2bff41e9bb52789d9e74de6eed41",
+    ".eep/adopted-assets.json": "d033a7cc67dd3ce5a08c59ca85f0efb94469ee5c5b5aff2c627d47eda1175962",
+    ".eep/deviations.json": "facc115b0dc40bd6b8df804d874530b6f8a95db3c6f6d6fc413ddb1c748353a7",
+    ".eep/ADOPTION.md": "7bd451977f44114aafc45be5fd33c62426dcfc904529f52a045b927aa8b4c039",
+    ".github/workflows/eep-ci.yml": "551c82181c7fdb00de3b72d0ed05377949adbedbf6f401b95fe04e270e745a6f",
+    "docs/contracts/network-ipc-source-v0.json": "062bc9e671f7c19d300b186e005e7987314ea181e5390829162d76be460d4273",
+    "docs/contracts/NETWORK_IPC_SOURCE_CONTRACT_V0.md": "89cc3c5f348454e29cf5396903aa9f71664d758bb755bd89010e5807f49ba50f",
+    "docs/migrations/NETWORK_IPC_V1_MIGRATION_PLAN.md": "f0bbaaf0654f0da388644beb7ec9194fdce9f3b5596ff515bb8754af8707e9a1",
+    "docs/engineering/cpp-profile.md": "98565886277cacb9cb0817c7a2e68152a95a55b5da99a80d9a8bc14a59e7c32e",
+    "docs/engineering/thread-model.md": "72a8b4e9f360a9cd5b2855717d4d7f18d81c83b0f9974af7fb8b1a1d638c934f",
+    "docs/engineering/resource-budget.md": "f3ad550c441c8f39eec5128852200442df38821268adbad168a3c661c0425104",
+    "docs/engineering/deviations.md": "4a51d1a24c6fbebf877578ab50371486c27db36a2b9fb9b8815191d9a7d124bc",
+    "docs/engineering/EEP_ADOPTION_EXECUTION.md": "4852bd47d15d75b2f6da2d08a1273e4a95709b29fbc98af6f1bf862bd77bc852",
+    "README.md": "beaaa51f3733a9b61ccf9aaaec6339b218a551b6bcc4e0a7529f849285751928",
+    "docs/ETH0_FAULT_POLICY.md": "599c00c1f9a488b5b72e6ec15d66f55f7235a647b57742faad6d32ef9545a215",
+    "tools/verify_product_adoption.py": "5996286665c2074f025273b228db1c9ae56fdfde13f85c9b177251ca7acc2e10",
+    "tools/verify_ipc_source_contract.py": "577f6c5123d4636b68ad75267debfbdd84471cdd1ebcc68cf450dbc145fa852f",
+    "tools/verify_architecture_boundaries.py": "986ce092971715d224866a5702be0c5c8f60b09c12579cba7ab86f0fdfe217e1"
+  }
+}

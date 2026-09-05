@@ -1,0 +1,57 @@
+name: EEP Product CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify EEP adoption metadata
+        run: python3 tools/verify_product_adoption.py
+      - name: Verify product IPC source contract
+        run: python3 tools/verify_ipc_source_contract.py
+      - name: Verify architecture boundaries
+        run: python3 tools/verify_architecture_boundaries.py
+
+  strict-host-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >-
+          cmake -S . -B build/strict
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS='-Wall -Wextra -Wpedantic -Werror'
+      - name: Build
+        run: cmake --build build/strict --parallel 2
+
+  asan-ubsan-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >-
+          cmake -S . -B build/sanitize
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS='-Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -g'
+          -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+      - name: Build
+        run: cmake --build build/sanitize --parallel 2
+      - name: Non-mutating CLI smoke under sanitizers
+        shell: bash
+        run: |
+          set +e
+          ASAN_OPTIONS=detect_leaks=1 ./app/smartcontrol/dnake/bin/network_service --help
+          rc=$?
+          set -e
+          test "$rc" -eq 1
