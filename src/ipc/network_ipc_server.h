@@ -1,7 +1,9 @@
 #ifndef NETWORK_SERVICE_IPC_SERVER_H
 #define NETWORK_SERVICE_IPC_SERVER_H
 
+#include <cstdint>
 #include <string>
+#include <vector>
 
 namespace network_service {
 
@@ -23,6 +25,8 @@ public:
 private:
     std::string handle_request(const std::string &request);
     void handle_client(int client_fd);
+    void handle_v0_client(int client_fd, const std::vector<std::uint8_t> &initial);
+    void handle_v1_client(int client_fd, const std::vector<std::uint8_t> &initial);
 
     NetworkDaemon &daemon_;
     int listen_fd_ = -1;
@@ -30,6 +34,8 @@ private:
     int wake_write_fd_ = -1;
     std::string socket_path_;
     bool running_ = false;
+    std::uint64_t generation_ = 1;
+    std::uint64_t next_session_sequence_ = 1;
 };
 
 } // namespace network_service
