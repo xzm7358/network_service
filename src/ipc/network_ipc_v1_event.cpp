@@ -47,6 +47,11 @@ std::uint64_t EventSequencer::next_sequence() const {
     return next_sequence_;
 }
 
+std::uint64_t EventSequencer::last_sequence() const {
+    if (next_sequence_ == 0) return std::numeric_limits<std::uint64_t>::max();
+    return next_sequence_ - 1;
+}
+
 std::vector<std::uint8_t> EventSequencer::encode_event(const std::string &event_name,
                                                        const std::string &payload_json) {
     if (event_name.empty() || payload_json.empty() || next_sequence_ == 0) return {};
