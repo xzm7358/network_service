@@ -96,8 +96,10 @@ def hello(sock: socket.socket):
 def assert_connection_rejected(sock: socket.socket, context: str):
     try:
         data = sock.recv(1)
-    except (ConnectionResetError, BrokenPipeError, socket.timeout):
+    except (ConnectionResetError, BrokenPipeError):
         return
+    except socket.timeout as exc:
+        raise AssertionError(f"{context}: rejection was not deterministic") from exc
     if data == b"":
         return
     raise AssertionError(f"{context}: expected rejection/close, received data={data!r}")
@@ -152,14 +154,16 @@ def test_request_id_correlation(path: Path):
 
 
 def test_invalid_magic_rejected(path: Path):
+    # Initial non-NSP1 bytes select the compatibility v0 path by contract.
+    # To test invalid v1 magic, first establish v1, then corrupt a later frame.
     with connect(path) as sock:
-        sock.sendall(encode_frame(TYPE_HELLO, {
-            "minVersion": 1,
-            "maxVersion": 1,
-            "client": "contract-test",
-            "capabilities": [],
+        hello(sock)
+        sock.sendall(encode_frame(TYPE_REQUEST, {
+            "requestId": 9,
+            "method": "network.ping",
+            "params": {},
         }, magic=b"BAD!"))
-        assert_connection_rejected(sock, "invalid magic")
+        assert_connection_rejected(sock, "invalid v1 magic after READY")
 
 
 def test_invalid_header_version_rejected(path: Path):
