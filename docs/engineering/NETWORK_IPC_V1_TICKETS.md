@@ -31,7 +31,7 @@ Status: Step 2.1 execution backlog
 - REQUEST before HELLO rejected
 - unsupported version rejected
 - valid REQUEST after READY -> RESPONSE with same requestId
-- invalid magic rejected
+- invalid v1 framing rejected after the connection is committed to v1
 - invalid version rejected
 - non-zero reserved flags rejected
 - oversized payload rejected
@@ -40,7 +40,7 @@ Status: Step 2.1 execution backlog
 **Exit criteria**
 - Test is deterministic and uses only a temporary Unix socket/config directory.
 - Test can be run against a built `network_service` binary.
-- First-tranche protocol behavior is implemented; the full test remains non-required until NS-IPC-106 completes the coexistence boundary and NS-IPC-110 promotes the gate.
+- First-tranche protocol behavior is implemented; the full test remains non-required until NS-IPC-110 promotes the gate.
 
 ---
 
@@ -118,19 +118,29 @@ Status: Step 2.1 execution backlog
 
 ## NS-IPC-106 — Freeze v0/v1 coexistence boundary
 
-**Status**: NEXT
+**Status**: DONE
 
 **Goal**: avoid heuristic protocol ambiguity during migration.
 
 **Deliverables**
-- explicit protocol-selection rule in server
-- compatibility tests for existing newline-delimited v0 requests
-- `tools/networkctl.py` migration decision recorded
+- freeze connection-scoped selector: first four octets exactly `NSP1` -> v1; otherwise -> v0
+- freeze no-fallback semantics after protocol commitment
+- add direct v0/v1 coexistence black-box regression
+- prove fragmented/whitespace-prefixed v0 requests remain v0
+- prove `NSP1` inside a v0 JSON payload has no selector meaning
+- prove malformed framing after v1 commitment cannot fall through to v0
+- keep `tools/networkctl.py` intentionally v0 as a compatibility sentinel
+- align the migration plan with the frozen 12-byte `NSP1` header
 
 **Exit criteria**
-- all frozen v0 tests green
-- all first-tranche v1 tests green
+- frozen v0 behavior green
+- v1 codec/session/correlation behavior green
+- strict coexistence regression green
+- sanitizer coexistence regression green
 - valid v0 cannot be misclassified as v1
+- a connection committed to v1 cannot fall through to v0
+- existing stalled-client v0 regression remains green
+- governance and static analysis green
 
 ---
 
@@ -181,6 +191,8 @@ Status: Step 2.1 execution backlog
 ---
 
 ## NS-IPC-110 — Promote v1 contract test to required CI
+
+**Status**: NEXT
 
 **Goal**: make v1 wire compatibility a product release gate.
 
