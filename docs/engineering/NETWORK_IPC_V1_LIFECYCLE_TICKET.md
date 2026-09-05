@@ -1,6 +1,6 @@
 # NS-IPC-111 — Long-lived v1 Session Lifecycle / Multi-client Poll Loop
 
-**Status**: IMPLEMENTED — verification pending
+**Status**: DONE
 
 ## Goal
 
@@ -30,15 +30,32 @@ Remove the final host-side server lifecycle constraints that prevent SmartContro
 
 ## Exit criteria
 
-- two simultaneous v1 sessions complete HELLO/READY independently
-- second session is not delayed behind a READY first session
-- READY session remains usable after >1 second idle
-- active client set never exceeds the configured bound
-- rejected capacity is reusable after disconnect
-- shutdown exits with active clients without hanging
-- NS-IPC-109 slow-reader semantics remain green
-- full v1 contract, EVENT, rebase, v0/v1 coexistence and v0 stalled-client regressions remain green
-- governance, strict build, ASan/UBSan and static analysis green
+- two simultaneous v1 sessions complete HELLO/READY independently — PASS
+- second session is not delayed behind a READY first session — PASS
+- READY session remains usable after >1 second idle — PASS
+- active client set never exceeds the configured bound — PASS
+- rejected capacity is reusable after disconnect — PASS
+- shutdown exits with active clients without hanging — PASS
+- NS-IPC-109 slow-reader semantics remain green — PASS
+- full v1 contract, EVENT, rebase, v0/v1 coexistence and v0 stalled-client regressions remain green — PASS
+- governance, strict build, ASan/UBSan and static analysis green — PASS
+
+## Verification evidence
+
+Implementation head before this status-only update: `f3d56d4f218fdbb5b508dff340c01ba08f2339a7`.
+
+EEP Product CI run #53 (`33967148673`): SUCCESS.
+
+- governance/adoption metadata: PASS
+- strict host build: PASS
+- v1 codec/session/full-contract regressions: PASS
+- EVENT sequencing: PASS
+- reconnect/snapshot rebase: PASS
+- bounded outbound backpressure: PASS
+- long-lived multi-client lifecycle regression: PASS
+- ASan/UBSan lifecycle regression: PASS
+- v0/v1 coexistence and v0 stalled-client regressions: PASS
+- Clang Static Analyzer: PASS
 
 ## Non-goals
 
