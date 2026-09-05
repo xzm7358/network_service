@@ -165,7 +165,12 @@ def main():
         config_dir.mkdir()
 
         process = subprocess.Popen(
-            [str(binary), "--socket", str(sock_path), "--eth", "lo", --wifi_placeholder],
+            [str(binary),
+             "--socket", str(sock_path),
+             "--eth", "lo",
+             "--wifi", "testwifi0",
+             "--config-dir", str(config_dir),
+             "--event-dir", str(event_dir)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
