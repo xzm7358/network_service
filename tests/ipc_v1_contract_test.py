@@ -136,7 +136,7 @@ def test_unsupported_version_rejected(path: Path):
 
 
 def test_request_id_correlation(path: Path):
-    request_id = 9223372036854775807
+    request_id = 18446744073709551615
     with connect(path) as sock:
         hello(sock)
         sock.sendall(encode_frame(TYPE_REQUEST, {
@@ -175,6 +175,12 @@ def test_invalid_header_version_rejected(path: Path):
             "capabilities": [],
         }, version=2))
         assert_connection_rejected(sock, "invalid header version")
+
+
+def test_invalid_message_type_rejected(path: Path):
+    with connect(path) as sock:
+        sock.sendall(encode_frame(99, {"invalid": True}))
+        assert_connection_rejected(sock, "invalid message type")
 
 
 def test_nonzero_flags_rejected(path: Path):
@@ -228,6 +234,7 @@ def main():
         test_request_id_correlation,
         test_invalid_magic_rejected,
         test_invalid_header_version_rejected,
+        test_invalid_message_type_rejected,
         test_nonzero_flags_rejected,
         test_oversized_payload_rejected,
         test_partial_frame_delivery,
