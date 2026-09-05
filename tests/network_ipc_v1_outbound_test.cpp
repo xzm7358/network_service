@@ -1,7 +1,10 @@
 #include "ipc/network_ipc_v1_outbound.h"
 
 #include <cassert>
+#include <cerrno>
 #include <cstdint>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <vector>
 
 using namespace network_service::ipc_v1;
@@ -10,6 +13,17 @@ namespace {
 
 std::vector<std::uint8_t> bytes(std::size_t size, std::uint8_t value) {
     return std::vector<std::uint8_t>(size, value);
+}
+
+void fill_send_buffer(int fd) {
+    std::vector<std::uint8_t> chunk(4096, 0x5a);
+    while (true) {
+        const ssize_t written = send(fd, chunk.data(), chunk.size(), MSG_DONTWAIT);
+        if (written > 0) continue;
+        assert(written < 0);
+        assert(errno == EAGAIN || errno == EWOULDBLOCK);
+        return;
+    }
 }
 
 } // namespace
@@ -59,6 +73,46 @@ int main() {
         assert(queue.empty());
         assert(queue.frame_count() == 0);
         assert(queue.queued_bytes() == 0);
+    }
+
+    {
+        int sockets[2] = {-1, -1};
+        assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+        int send_buffer = 4096;
+        assert(setsockopt(sockets[0], SOL_SOCKET, SO_SNDBUF,
+                          &send_buffer, sizeof(send_buffer)) == 0);
+        fill_send_buffer(sockets[0]);
+
+        OutboundWriter writer(4, 4096, 20);
+        assert(writer.enqueue(bytes(128, 9)) == OutboundEnqueueResult::Accepted);
+        assert(writer.flush(sockets[0], -1) == OutboundFlushResult::SlowClient);
+        assert(writer.queue().queued_bytes() == 128);
+
+        close(sockets[0]);
+        close(sockets[1]);
+    }
+
+    {
+        int sockets[2] = {-1, -1};
+        int wake[2] = {-1, -1};
+        assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+        assert(pipe(wake) == 0);
+        int send_buffer = 4096;
+        assert(setsockopt(sockets[0], SOL_SOCKET, SO_SNDBUF,
+                          &send_buffer, sizeof(send_buffer)) == 0);
+        fill_send_buffer(sockets[0]);
+        const char signal = 'x';
+        assert(write(wake[1], &signal, 1) == 1);
+
+        OutboundWriter writer(4, 4096, 1000);
+        assert(writer.enqueue(bytes(128, 10)) == OutboundEnqueueResult::Accepted);
+        assert(writer.flush(sockets[0], wake[0]) == OutboundFlushResult::Interrupted);
+        assert(writer.queue().queued_bytes() == 128);
+
+        close(wake[0]);
+        close(wake[1]);
+        close(sockets[0]);
+        close(sockets[1]);
     }
 
     return 0;
