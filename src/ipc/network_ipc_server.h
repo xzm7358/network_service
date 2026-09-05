@@ -3,7 +3,6 @@
 
 #include <cstdint>
 #include <string>
-#include <vector>
 
 #include "ipc/network_ipc_v1_event.h"
 
@@ -26,9 +25,6 @@ public:
 
 private:
     std::string handle_request(const std::string &request);
-    void handle_client(int client_fd);
-    void handle_v0_client(int client_fd, const std::vector<std::uint8_t> &initial);
-    void handle_v1_client(int client_fd, const std::vector<std::uint8_t> &initial);
 
     NetworkDaemon &daemon_;
     int listen_fd_ = -1;

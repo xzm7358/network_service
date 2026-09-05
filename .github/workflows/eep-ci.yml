@@ -61,6 +61,10 @@ jobs:
         run: >-
           python3 tests/ipc_v1_backpressure_test.py
           --binary ./app/smartcontrol/dnake/bin/network_service
+      - name: IPC v1 long-lived multi-client lifecycle regression
+        run: >-
+          python3 tests/ipc_v1_lifecycle_test.py
+          --binary ./app/smartcontrol/dnake/bin/network_service
 
   asan-ubsan-build:
     runs-on: ubuntu-latest
@@ -108,6 +112,11 @@ jobs:
         run: >-
           env ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1
           python3 tests/ipc_v1_backpressure_test.py
+          --binary ./app/smartcontrol/dnake/bin/network_service
+      - name: IPC v1 long-lived multi-client lifecycle regression under sanitizers
+        run: >-
+          env ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1
+          python3 tests/ipc_v1_lifecycle_test.py
           --binary ./app/smartcontrol/dnake/bin/network_service
       - name: Non-mutating CLI smoke under sanitizers
         shell: bash
