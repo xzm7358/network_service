@@ -40,6 +40,7 @@ int main() {
         const Frame ready = make_ready(session);
         assert(ready.payload.find("\"request-response\"") != std::string::npos);
         assert(ready.payload.find("\"events\"") != std::string::npos);
+        assert(ready.payload.find("\"snapshot-rebase\"") != std::string::npos);
         const Frame response = decode_response(session.handle_frame(make_frame(
             MessageType::Request,
             R"({"requestId":18446744073709551615,"method":"network.ping","params":{}})"))
@@ -47,6 +48,19 @@ int main() {
         assert(response.header.type == MessageType::Response);
         assert(response.payload.find("\"requestId\":18446744073709551615") != std::string::npos);
         assert(response.payload.find("\"status\":200") != std::string::npos);
+    }
+
+    {
+        Session session(42, "session-42-snapshot");
+        make_ready(session);
+        const auto snapshot = session.handle_frame(make_frame(
+            MessageType::Request,
+            R"({"requestId":88,"method":"network.snapshot","params":{}})"));
+        assert(snapshot.response.empty());
+        assert(!snapshot.close_after_send);
+        assert(snapshot.server_action == Session::ServerAction::SendAuthoritativeSnapshot);
+        assert(snapshot.action_request_id == 88);
+        assert(session.ready());
     }
 
     {
