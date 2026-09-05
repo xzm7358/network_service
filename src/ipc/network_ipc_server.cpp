@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include "ipc/network_ipc_v1_codec.h"
+#include "ipc/network_ipc_v1_rebase.h"
 #include "ipc/network_ipc_v1_session.h"
 #include "network_service_protocol.h"
 #include "service/network_daemon.h"
@@ -425,6 +426,14 @@ void NetworkIpcServer::handle_v1_client(int client_fd, const std::vector<std::ui
                 const std::vector<std::uint8_t> event =
                     event_sequencer_.encode_event("network.events.subscribed", "{}");
                 if (event.empty() || !send_all(client_fd, event)) return false;
+            } else if (result.server_action ==
+                       ipc_v1::Session::ServerAction::SendAuthoritativeSnapshot) {
+                const std::vector<std::uint8_t> response = ipc_v1::encode_snapshot_response(
+                    result.action_request_id,
+                    generation_,
+                    event_sequencer_.last_sequence(),
+                    daemon_.snapshot_result_json());
+                if (response.empty() || !send_all(client_fd, response)) return false;
             }
             if (result.close_after_send) return false;
         }
