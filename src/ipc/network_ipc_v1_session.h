@@ -18,9 +18,15 @@ public:
         Closed,
     };
 
+    enum class ServerAction {
+        None = 0,
+        EmitEventsSubscribed,
+    };
+
     struct HandleResult {
         std::vector<std::uint8_t> response;
         bool close_after_send = false;
+        ServerAction server_action = ServerAction::None;
     };
 
     Session(std::uint64_t generation, std::string session_id);
@@ -28,6 +34,7 @@ public:
     HandleResult handle_frame(const Frame &frame);
     State state() const;
     bool ready() const;
+    bool events_subscribed() const;
 
 private:
     HandleResult error_result(const char *code, const char *message, bool close_after_send);
@@ -42,6 +49,7 @@ private:
     std::uint64_t generation_;
     std::string session_id_;
     State state_ = State::AwaitHello;
+    bool events_subscribed_ = false;
 };
 
 } // namespace ipc_v1
