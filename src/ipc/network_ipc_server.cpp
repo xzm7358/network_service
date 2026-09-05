@@ -21,6 +21,8 @@ namespace network_service {
 namespace {
 
 static int g_wake_fd = -1;
+constexpr int kClientIdleTimeoutMs = 1000;
+constexpr size_t kMaxRequestBytes = 64 * 1024;
 
 static std::string json_unescape(const std::string &value) {
     std::string out;
@@ -290,6 +292,36 @@ void NetworkIpcServer::handle_client(int client_fd) {
     std::string request;
     char buffer[1024];
     while (true) {
+        struct pollfd fds[2];
+        fds[0].fd = client_fd;
+        fds[0].events = POLLIN;
+        fds[0].revents = 0;
+        nfds_t poll_count = 1;
+        if (wake_read_fd_ >= 0) {
+            fds[1].fd = wake_read_fd_;
+            fds[1].events = POLLIN;
+            fds[1].revents = 0;
+            poll_count = 2;
+        }
+
+        int ret = poll(fds, poll_count, kClientIdleTimeoutMs);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            return;
+        }
+        if (ret == 0) {
+            return;
+        }
+        if (poll_count > 1 && (fds[1].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL))) {
+            return;
+        }
+        if (fds[0].revents & (POLLERR | POLLNVAL)) {
+            return;
+        }
+        if (!(fds[0].revents & (POLLIN | POLLHUP))) {
+            continue;
+        }
+
         ssize_t n = recv(client_fd, buffer, sizeof(buffer), 0);
         if (n < 0) {
             if (errno == EINTR) continue;
@@ -297,7 +329,10 @@ void NetworkIpcServer::handle_client(int client_fd) {
         }
         if (n == 0) break;
         request.append(buffer, static_cast<size_t>(n));
-        if (request.find('\n') != std::string::npos || request.size() > 64 * 1024) {
+        if (request.size() > kMaxRequestBytes) {
+            return;
+        }
+        if (request.find('\n') != std::string::npos) {
             break;
         }
     }
