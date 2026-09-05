@@ -3,48 +3,43 @@
 ## Baseline
 
 - Repository: `xzm7358/network_service`
-- Baseline branch: `main`
-- Baseline commit: `0b415f57c9bf2519645099513f7b73c18a174e8b`
+- Original brownfield baseline: `0b415f57c9bf2519645099513f7b73c18a174e8b`
 - EEP release: `1.20.0`
 
-## Change class
+## NS-ADOPT-001 production adoption
 
-Governance/documentation/CI adoption only. This change does not intentionally modify runtime network mutation logic.
+`NS-ADOPT-001` was applied through product pull request #1 and merged to `main` as `f89777da1bd3cbc194a72209f8959238a851332c` after product CI passed:
 
-## Prepared changes
+- adoption metadata/hash-lock verification;
+- product IPC v0 source-contract verification;
+- architecture-boundary verification;
+- strict host build with `-Wall -Wextra -Wpedantic -Werror`;
+- ASan + UBSan build and non-mutating CLI smoke.
 
-- `.eep` brownfield adoption metadata and hash lock;
-- current product IPC v0 source contract freeze;
-- governed v0 → EEP Network IPC v1 migration plan;
-- README and eth0 policy reconciliation with executable explicit-apply behavior;
-- product-owned GitHub Actions workflow;
-- adoption metadata, IPC contract-surface and architecture-boundary verifiers;
-- C++/thread/resource/deviation engineering profile documents.
+The adoption intentionally did not claim EEP Network IPC v1 compatibility or real target/HIL completion.
 
-## Local evidence
+## NS-FIX-007 runtime follow-up
 
-Before remote application, the staged adoption assets passed:
+`NS-FIX-007` is a separate runtime safety change created only after the adoption CI gate passed. It adds:
 
-- adoption metadata/hash-lock verifier;
-- IPC source-contract verifier self-test;
-- architecture-boundary verifier self-test;
-- JSON syntax validation.
+- a 1000 ms accepted-client idle/progress bound;
+- wake-pipe participation while waiting on a client so SIGTERM/SIGINT can interrupt a stalled session;
+- explicit close of requests exceeding the observed 64 KiB v0 bound;
+- deterministic stalled-client and shutdown regression coverage;
+- sanitizer regression execution and Clang static analysis in product CI.
 
-## Remote execution state
+The frozen v0 source contract remains immutable evidence of the original baseline. The bounded-read delta is documented separately and does not claim Network IPC v1 compatibility.
 
-GitHub write permission was restored and branch `eep/ns-adopt-001` was created from the immutable baseline commit. The adoption changes are being applied to that branch. Product PR/CI evidence is not claimed until the pull request exists and GitHub Actions completes successfully.
+## Remaining production evidence debt
 
-## Evidence not yet available
+The following remain outside the scope of these two host-side changes and must not be claimed as complete:
 
-The following MUST NOT be treated as PASS until the product pull request/target environment executes:
-
-- product GitHub Actions workflow;
-- strict host build against the complete product source tree;
-- ASan/UBSan product build/smoke;
-- full IPC source-contract comparison against repository source in CI;
 - real wall-panel target/HIL evidence;
+- target resource budgets and latency measurements;
+- v0 → EEP Network IPC v1 migration;
+- removal of the SmartControl-specific build output path;
 - production Agent Runtime/provider evidence.
 
 ## Gate rule
 
-`NS-FIX-007` remains a separate runtime change and MUST NOT be applied or merged until `NS-ADOPT-001` product CI is green.
+A runtime follow-up is eligible to merge only when its product CI, including the deterministic regression that reproduces the original failure mode, is green. GitHub Actions/PR history is the authoritative evidence for that merge gate.

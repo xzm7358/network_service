@@ -19,6 +19,15 @@
       "compensatingControl": "Keep the behavior unchanged in the adoption-only change; move product placement into packaging/integration in a dedicated follow-up change.",
       "owner": "NetworkService",
       "reviewRequired": true
+    },
+    {
+      "id": "NET-BROWNFIELD-003",
+      "rule": "CONTRACT-TRANS/CPP-CONC",
+      "severity": "P1",
+      "reason": "The frozen v0 server performs a blocking recv() inside a single-threaded client handler; one incomplete local client can monopolize the IPC server.",
+      "compensatingControl": "Apply the bounded-read follow-up patch and keep the deterministic stalled-client regression in product CI until Network IPC v1 replaces the v0 transport.",
+      "owner": "NetworkService",
+      "reviewRequired": true
     }
   ]
 }

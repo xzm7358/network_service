@@ -55,3 +55,30 @@ jobs:
           rc=$?
           set -e
           test "$rc" -eq 1
+      - name: Bounded IPC regression under sanitizers
+        run: >-
+          env ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1
+          python3 tests/ipc_stalled_client_test.py
+          --binary ./app/smartcontrol/dnake/bin/network_service
+
+  clang-static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Analyzer version
+        run: clang++ --version
+      - name: Analyze translation units
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in \
+            src/main.cpp \
+            src/service/network_daemon.cpp \
+            src/ipc/network_ipc_server.cpp \
+            src/platform/interface_snapshot.cpp \
+            src/config/ethernet_config.cpp \
+            src/platform/ethernet_apply.cpp \
+            src/platform/wifi_backend.cpp \
+            src/platform/wpa_event_monitor.cpp; do
+            clang++ --analyze -std=c++17 -Iinclude -Isrc "$f"
+          done
