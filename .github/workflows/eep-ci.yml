@@ -34,6 +34,8 @@ jobs:
           -DCMAKE_CXX_FLAGS='-Wall -Wextra -Wpedantic -Werror'
       - name: Build
         run: cmake --build build/strict --parallel 2
+      - name: Codec contract tests
+        run: ctest --test-dir build/strict --output-on-failure
 
   asan-ubsan-build:
     runs-on: ubuntu-latest
@@ -47,6 +49,10 @@ jobs:
           -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
       - name: Build
         run: cmake --build build/sanitize --parallel 2
+      - name: Codec contract tests under sanitizers
+        run: >-
+          env ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1
+          ctest --test-dir build/sanitize --output-on-failure
       - name: Non-mutating CLI smoke under sanitizers
         shell: bash
         run: |
@@ -75,6 +81,7 @@ jobs:
             src/main.cpp \
             src/service/network_daemon.cpp \
             src/ipc/network_ipc_server.cpp \
+            src/ipc/network_ipc_v1_codec.cpp \
             src/platform/interface_snapshot.cpp \
             src/config/ethernet_config.cpp \
             src/platform/ethernet_apply.cpp \
