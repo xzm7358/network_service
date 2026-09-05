@@ -14,6 +14,7 @@ HEADER = struct.Struct(">4sBBHI")
 TYPE_HELLO = 1
 TYPE_READY = 2
 TYPE_REQUEST = 3
+TYPE_RESPONSE = 4
 TYPE_ERROR = 6
 
 
@@ -70,18 +71,25 @@ def hello_frame(min_version=1, max_version=1):
     })
 
 
+def hello(sock: socket.socket):
+    sock.sendall(hello_frame())
+    msg_type, payload = recv_frame(sock)
+    if msg_type != TYPE_READY:
+        raise AssertionError(f"expected READY, got type={msg_type} payload={payload}")
+    return payload
+
+
 def test_hello_ready(path: Path):
     with connect(path) as sock:
-        sock.sendall(hello_frame())
-        msg_type, payload = recv_frame(sock)
-        if msg_type != TYPE_READY:
-            raise AssertionError(f"expected READY, got type={msg_type} payload={payload}")
+        payload = hello(sock)
         if payload.get("version") != 1 or payload.get("service") != "network_service":
             raise AssertionError(f"invalid READY identity: {payload}")
         if not payload.get("sessionId"):
             raise AssertionError(f"READY missing sessionId: {payload}")
         if not isinstance(payload.get("generation"), int) or payload["generation"] <= 0:
             raise AssertionError(f"READY missing positive generation: {payload}")
+        if "request-response" not in payload.get("capabilities", []):
+            raise AssertionError(f"READY missing request-response capability: {payload}")
 
 
 def test_request_before_ready(path: Path):
@@ -121,17 +129,63 @@ def test_reconnect_gets_new_session(path: Path):
     ready_payloads = []
     for _ in range(2):
         with connect(path) as sock:
-            sock.sendall(hello_frame())
-            msg_type, payload = recv_frame(sock)
-            if msg_type != TYPE_READY:
-                raise AssertionError(f"expected READY during reconnect test: {msg_type} {payload}")
-            ready_payloads.append(payload)
+            ready_payloads.append(hello(sock))
 
     first, second = ready_payloads
     if first.get("sessionId") == second.get("sessionId"):
         raise AssertionError(f"sessionId reused across reconnect: {first}")
     if first.get("generation") != second.get("generation"):
         raise AssertionError(f"generation changed without server restart: {ready_payloads}")
+
+
+def test_request_id_correlation(path: Path):
+    request_id = 18446744073709551615
+    with connect(path) as sock:
+        hello(sock)
+        sock.sendall(encode_frame(TYPE_REQUEST, {
+            "requestId": request_id,
+            "method": "network.ping",
+            "params": {},
+        }))
+        msg_type, payload = recv_frame(sock)
+        if msg_type != TYPE_RESPONSE:
+            raise AssertionError(f"ping expected RESPONSE, got {msg_type} {payload}")
+        if payload.get("requestId") != request_id:
+            raise AssertionError(f"requestId not preserved exactly: {payload}")
+        if payload.get("status") != 200:
+            raise AssertionError(f"network.ping failed: {payload}")
+
+
+def test_unknown_method_correlated_error(path: Path):
+    request_id = 77
+    with connect(path) as sock:
+        hello(sock)
+        sock.sendall(encode_frame(TYPE_REQUEST, {
+            "requestId": request_id,
+            "method": "does.not.exist",
+            "params": {},
+        }))
+        msg_type, payload = recv_frame(sock)
+        if msg_type != TYPE_RESPONSE:
+            raise AssertionError(f"unknown method expected RESPONSE: {msg_type} {payload}")
+        if payload.get("requestId") != request_id or payload.get("status") != 404:
+            raise AssertionError(f"unknown method correlation/status mismatch: {payload}")
+        if payload.get("error", {}).get("code") != "METHOD_NOT_FOUND":
+            raise AssertionError(f"unknown method error code mismatch: {payload}")
+
+
+def test_invalid_request_id_rejected(path: Path):
+    for bad_id in [0, -1, 1.5]:
+        with connect(path) as sock:
+            hello(sock)
+            sock.sendall(encode_frame(TYPE_REQUEST, {
+                "requestId": bad_id,
+                "method": "network.ping",
+                "params": {},
+            }))
+            msg_type, payload = recv_frame(sock)
+            if msg_type != TYPE_ERROR or payload.get("code") != "INVALID_REQUEST_ID":
+                raise AssertionError(f"bad requestId {bad_id!r} not rejected: {msg_type} {payload}")
 
 
 def main():
@@ -148,6 +202,9 @@ def main():
         test_unsupported_version,
         test_partial_hello,
         test_reconnect_gets_new_session,
+        test_request_id_correlation,
+        test_unknown_method_correlated_error,
+        test_invalid_request_id_rejected,
     ]
 
     with tempfile.TemporaryDirectory(prefix="network-service-ipc-v1-session-") as td:
@@ -177,7 +234,7 @@ def main():
                     process.kill()
                     process.wait()
 
-    print(f"IPC v1 session negotiation: PASS ({len(tests)}/{len(tests)})")
+    print(f"IPC v1 session/request correlation: PASS ({len(tests)}/{len(tests)})")
     return 0
 
 
