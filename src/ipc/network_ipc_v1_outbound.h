@@ -14,12 +14,20 @@ namespace ipc_v1 {
 constexpr std::size_t kDefaultOutboundMaxFrames = 32;
 constexpr std::size_t kDefaultOutboundMaxBytes =
     4 * (kHeaderSize + kMaxPayloadBytes);
+constexpr int kDefaultWriteStallTimeoutMs = 1000;
 
 enum class OutboundEnqueueResult {
     Accepted = 0,
     InvalidFrame,
     FrameTooLarge,
     Overflow,
+};
+
+enum class OutboundFlushResult {
+    Drained = 0,
+    SlowClient,
+    Interrupted,
+    Disconnected,
 };
 
 class OutboundQueue {
@@ -50,6 +58,22 @@ private:
     std::size_t max_bytes_;
     std::size_t queued_bytes_ = 0;
     std::deque<PendingFrame> frames_;
+};
+
+class OutboundWriter {
+public:
+    explicit OutboundWriter(std::size_t max_frames = kDefaultOutboundMaxFrames,
+                            std::size_t max_bytes = kDefaultOutboundMaxBytes,
+                            int write_stall_timeout_ms = kDefaultWriteStallTimeoutMs);
+
+    OutboundEnqueueResult enqueue(std::vector<std::uint8_t> frame);
+    OutboundFlushResult flush(int fd, int wake_read_fd);
+
+    const OutboundQueue &queue() const;
+
+private:
+    OutboundQueue queue_;
+    int write_stall_timeout_ms_;
 };
 
 } // namespace ipc_v1
