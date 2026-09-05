@@ -1,6 +1,6 @@
 # Network IPC v1 — Executable Tickets
 
-Status: Step 2.1 first wire-contract tranche and EVENT sequencing/generation tranche COMPLETE; reconnect/rebase and outbound backpressure remain follow-up tranches.
+Status: Step 2.1 first wire-contract, EVENT sequencing/generation, and reconnect/snapshot-rebase tranches COMPLETE; bounded outbound backpressure remains the next protocol tranche.
 
 ## NS-IPC-101 — Freeze v1 wire contract
 
@@ -175,29 +175,50 @@ Status: Step 2.1 first wire-contract tranche and EVENT sequencing/generation tra
 **Boundary retained for follow-up**
 - NS-IPC-107 emits only one synchronous subscription control EVENT per session and introduces no outbound EVENT queue.
 - Continuous/unsolicited state EVENT delivery remains disabled until NS-IPC-109 defines bounded slow-client/backpressure behavior.
-- Authoritative reconnect/snapshot rebase remains NS-IPC-108.
+- Authoritative reconnect/snapshot rebase is now implemented by NS-IPC-108.
 - The current single-client/serial accept loop and short accepted-client idle timeout remain a known production constraint for long-lived EVENT sessions.
 
 ---
 
 ## NS-IPC-108 — Reconnect / snapshot rebase
 
-**Status**: NEXT
+**Status**: DONE
 
-**Goal**: make consumer recovery deterministic across service/client restart and event gaps.
+**Goal**: make consumer recovery deterministic across reconnect, server restart, generation change, and EVENT sequence gaps.
 
 **Deliverables**
-- authoritative snapshot rebase flow
-- gap/generation-change behavior
-- restart/reconnect integration tests
+- v1 `network.snapshot` REQUEST surface and READY `snapshot-rebase` capability
+- `NetworkDaemon::snapshot_result_json()` authoritative live snapshot payload boundary
+- `EventSequencer::last_sequence()` server-owned snapshot watermark
+- correlated snapshot RESPONSE containing `generation`, `snapshotSeq`, and authoritative `snapshot`
+- `src/ipc/network_ipc_v1_rebase.{h,cpp}` with `RebaseTracker`
+- deterministic `Accept` / `IgnoreStale` / `RebaseRequired` event decisions
+- reconnect, generation-change, gap, stale-event, duplicate-event, and exact-next-event semantics
+- `tests/network_ipc_v1_rebase_test.cpp` rebase state/envelope contract test
+- `tests/ipc_v1_rebase_test.py` real Unix-socket reconnect + server-restart regression
+- strict and ASan/UBSan CI gates for reconnect/snapshot rebase
 
 **Exit criteria**
-- server restart, client restart, and sequence-gap tests green
-- no stale incremental state survives rebase
+- reconnect creates a fresh `sessionId` and requires a fresh snapshot baseline
+- same-process reconnect preserves server generation and snapshot watermark covers prior EVENTs
+- first accepted post-rebase EVENT is exactly `snapshotSeq + 1`
+- server restart changes generation, resets snapshot watermark to `0`, and begins new-generation EVENT sequence at `1`
+- generation mismatch and forward sequence gap invalidate the baseline and require rebase
+- stale/duplicate EVENTs do not advance the projection
+- authoritative snapshot RESPONSE preserves exact request correlation
+- existing full v1 wire contract, EVENT sequencing, v0/v1 coexistence, and v0 stalled-client regressions remain green
+- governance, strict build, ASan/UBSan, and static analysis green
+
+**Boundary retained for follow-up**
+- Continuous/unsolicited state EVENT delivery is still disabled.
+- NS-IPC-108 introduces no outbound EVENT queue.
+- Subscription/snapshot ordering for continuous delivery must be paired with the bounded queue/backpressure semantics in NS-IPC-109 so state changes cannot fall into an unobservable rebase window.
 
 ---
 
 ## NS-IPC-109 — Bounded outbound backpressure
+
+**Status**: NEXT
 
 **Goal**: prevent slow clients from consuming unbounded memory or blocking the service.
 
