@@ -22,13 +22,14 @@ Frame decode_response(const std::vector<std::uint8_t> &encoded) {
     return decoder.take_frame();
 }
 
-void make_ready(Session &session) {
+Frame make_ready(Session &session) {
     const auto result = session.handle_frame(make_frame(
         MessageType::Hello,
         R"({"minVersion":1,"maxVersion":1,"client":"test","capabilities":[]})"));
     assert(!result.response.empty());
     assert(!result.close_after_send);
     assert(session.ready());
+    return decode_response(result.response);
 }
 
 } // namespace
@@ -36,7 +37,9 @@ void make_ready(Session &session) {
 int main() {
     {
         Session session(42, "session-42-1");
-        make_ready(session);
+        const Frame ready = make_ready(session);
+        assert(ready.payload.find("\"request-response\"") != std::string::npos);
+        assert(ready.payload.find("\"events\"") != std::string::npos);
         const Frame response = decode_response(session.handle_frame(make_frame(
             MessageType::Request,
             R"({"requestId":18446744073709551615,"method":"network.ping","params":{}})"))
@@ -44,6 +47,27 @@ int main() {
         assert(response.header.type == MessageType::Response);
         assert(response.payload.find("\"requestId\":18446744073709551615") != std::string::npos);
         assert(response.payload.find("\"status\":200") != std::string::npos);
+    }
+
+    {
+        Session session(42, "session-42-subscribe");
+        make_ready(session);
+        const auto first = session.handle_frame(make_frame(
+            MessageType::Request,
+            R"({"requestId":9,"method":"network.events.subscribe","params":{}})"));
+        const Frame first_response = decode_response(first.response);
+        assert(first_response.header.type == MessageType::Response);
+        assert(first_response.payload.find("\"requestId\":9") != std::string::npos);
+        assert(first_response.payload.find("\"subscribed\":true") != std::string::npos);
+        assert(first.server_action == Session::ServerAction::EmitEventsSubscribed);
+        assert(session.events_subscribed());
+
+        const auto duplicate = session.handle_frame(make_frame(
+            MessageType::Request,
+            R"({"requestId":10,"method":"network.events.subscribe","params":{}})"));
+        assert(decode_response(duplicate.response).header.type == MessageType::Response);
+        assert(duplicate.server_action == Session::ServerAction::None);
+        assert(session.events_subscribed());
     }
 
     {
