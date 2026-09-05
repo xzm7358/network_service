@@ -11,6 +11,7 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/main.cpp
     src/service/network_daemon.cpp
     src/ipc/network_ipc_server.cpp
+    src/ipc/network_ipc_v1_codec.cpp
     src/platform/interface_snapshot.cpp
     src/config/ethernet_config.cpp
     src/platform/ethernet_apply.cpp
@@ -32,6 +33,18 @@ target_link_libraries(${NETWORK_SERVICE_TARGET} PRIVATE pthread)
 set_target_properties(${NETWORK_SERVICE_TARGET} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/app/smartcontrol/dnake/bin"
 )
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(network_ipc_v1_codec_test
+        tests/network_ipc_v1_codec_test.cpp
+        src/ipc/network_ipc_v1_codec.cpp
+    )
+    target_include_directories(network_ipc_v1_codec_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME network_ipc_v1_codec COMMAND network_ipc_v1_codec_test)
+endif()
 
 install(TARGETS ${NETWORK_SERVICE_TARGET}
     RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
