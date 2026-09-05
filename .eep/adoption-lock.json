@@ -9,7 +9,7 @@
     ".eep/adopted-assets.json": "d033a7cc67dd3ce5a08c59ca85f0efb94469ee5c5b5aff2c627d47eda1175962",
     ".eep/deviations.json": "cbca8d5d583c98fe3ef061d5e60da85336e4546ac5946e7478e40fd06aa0fd77",
     ".eep/ADOPTION.md": "7bd451977f44114aafc45be5fd33c62426dcfc904529f52a045b927aa8b4c039",
-    ".github/workflows/eep-ci.yml": "5712cbec8cb32418be9f7c31e7c14357d2459fddabf728e67851457010dda06b",
+    ".github/workflows/eep-ci.yml": "386b6c3a6350f57033094ed6cf4bbc9370b977cf8050387a9ad8434810d64f81",
     "docs/contracts/network-ipc-source-v0.json": "062bc9e671f7c19d300b186e005e7987314ea181e5390829162d76be460d4273",
     "docs/contracts/NETWORK_IPC_SOURCE_CONTRACT_V0.md": "89cc3c5f348454e29cf5396903aa9f71664d758bb755bd89010e5807f49ba50f",
     "docs/contracts/NETWORK_IPC_V0_BOUNDED_READ_DELTA.md": "7cd933dec62d5dfb8aff66927aa90047dd217714617cbb99ff4501522c0d9ee2",
