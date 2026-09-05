@@ -2,7 +2,7 @@
 
 ## Status
 
-Step 2.1 active: v1 framing, HELLO/READY, request correlation, and explicit v0/v1 coexistence are implemented on the migration branch. Event/reconnect semantics and final v1 CI promotion remain follow-up work.
+Step 2.1 first wire-contract tranche is complete on the migration branch: v1 framing, HELLO/READY, request correlation, explicit v0/v1 coexistence, and the full first-tranche v1 contract CI gate are implemented and green. Event/reconnect/backpressure semantics remain follow-up work.
 
 ## Source
 
@@ -47,6 +47,8 @@ NS-IPC-104 through NS-IPC-106 establish the bounded dual-stack migration window:
 3. REQUEST/RESPONSE uses non-zero uint64 `requestId` correlation.
 4. v0 and v1 share the same Unix-domain socket through an explicit connection-prefix selector.
 5. v0 remains compatibility-only; no new consumer may adopt v0.
+
+NS-IPC-110 promotes `tests/ipc_v1_contract_test.py` to a product CI release gate in both strict-host and ASan/UBSan jobs. The required first-tranche wire evidence therefore travels with every pull request and push to `main`.
 
 #### Frozen protocol-selection boundary
 
