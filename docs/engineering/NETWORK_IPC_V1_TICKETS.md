@@ -19,7 +19,7 @@ Status: Step 2.1 execution backlog
 
 ## NS-IPC-102 — Add first black-box protocol contract tests
 
-**Status**: DONE (RED tranche retained until request correlation lands)
+**Status**: DONE (first tranche behavior implemented; promotion to required CI remains NS-IPC-110)
 
 **Goal**: create an executable RED test tranche for the v1 session contract before server integration.
 
@@ -40,7 +40,7 @@ Status: Step 2.1 execution backlog
 **Exit criteria**
 - Test is deterministic and uses only a temporary Unix socket/config directory.
 - Test can be run against a built `network_service` binary.
-- Until NS-IPC-105 is implemented, request correlation remains expected RED and the full test is not yet a required CI gate.
+- First-tranche protocol behavior is implemented; the full test remains non-required until NS-IPC-106 completes the coexistence boundary and NS-IPC-110 promotes the gate.
 
 ---
 
@@ -93,23 +93,32 @@ Status: Step 2.1 execution backlog
 
 ## NS-IPC-105 — Add requestId correlation
 
-**Status**: NEXT
+**Status**: DONE
 
 **Goal**: v1 REQUEST/RESPONSE correlation independent of response ordering.
 
 **Deliverables**
-- validate non-zero uint64 requestId
-- dispatch `network.ping` through v1 request envelope
+- validate non-zero uint64 requestId, including exact `UINT64_MAX` handling
+- reject zero, negative, fractional, overflow, duplicate, and missing requestId forms
+- handle protocol-level `network.ping` through the v1 request envelope
 - RESPONSE echoes exact requestId
-- structured v1 error envelope
+- structured correlated error envelope
+- unknown method returns correlated `METHOD_NOT_FOUND`
+- READY advertises `request-response` capability
 
 **Exit criteria**
-- correlation tests green
-- unknown method returns `METHOD_NOT_FOUND`
+- unit correlation tests green
+- black-box Unix-socket correlation tests green
+- strict build green
+- ASan/UBSan green
+- existing v0 stalled-client regression green
+- static analysis green
 
 ---
 
 ## NS-IPC-106 — Freeze v0/v1 coexistence boundary
+
+**Status**: NEXT
 
 **Goal**: avoid heuristic protocol ambiguity during migration.
 
