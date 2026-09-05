@@ -144,13 +144,22 @@ Event subscription and full event surface are Step 2.1 follow-up work; the seque
 
 The existing v0 stalled-client regression remains required during migration.
 
-## 9. Compatibility rule
+## 9. Compatibility and protocol-selection rule
 
-During the bounded migration window:
+During the bounded migration window, v0 and v1 share the same Unix-domain socket. Protocol selection is connection-scoped and is frozen as follows:
 
-- Existing v0 consumers remain supported only through an explicit v0 path.
+1. Read enough initial octets to decide whether the connection prefix is the four-byte ASCII magic `NSP1`.
+2. If the first four octets are exactly `NSP1`, the connection is committed to the v1 framed-session path for its lifetime.
+3. Otherwise the connection is committed to the frozen v0 newline-delimited JSON path for its lifetime.
+4. Once a connection is committed to v1, any malformed v1 header/frame is rejected as v1 and MUST NOT fall through to the v0 JSON parser.
+5. Once a connection is committed to v0, occurrences of the string `NSP1` later in the JSON payload have no protocol-selection meaning.
+6. Protocol selection MUST NOT inspect JSON fields such as `method`, `version`, or payload shape. It is a transport-prefix discriminator, not heuristic field sniffing.
+
+Migration rules:
+
+- Existing v0 consumers remain supported only through the explicit v0 path.
 - New consumers MUST use v1.
-- No heuristic field sniffing may silently reinterpret a valid v0 request as v1.
+- `tools/networkctl.py` remains intentionally v0 during this bounded migration window and serves as a compatibility sentinel; it MUST NOT silently auto-negotiate or fall back between protocols.
 - v0 removal requires consumer migration, CI evidence, and real-target restart/reconnect evidence.
 
 ## 10. Initial contract-test tranche
@@ -166,5 +175,6 @@ The first executable tranche freezes these invariants:
 7. unsupported version range is rejected.
 8. RESPONSE echoes non-zero uint64 `requestId`.
 9. invalid magic/version/type/flags never reaches command dispatch.
+10. valid v0 and valid v1 traffic remain disjoint under the frozen four-octet protocol selector.
 
 Event delivery, generation-gap reconciliation, multi-outstanding request concurrency, and explicit outbound-backpressure behavior are subsequent tranches.
