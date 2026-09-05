@@ -1,6 +1,6 @@
 # Network IPC v1 — Executable Tickets
 
-Status: Step 2.1 first wire-contract tranche COMPLETE; event/reconnect/backpressure remain follow-up tranches.
+Status: Step 2.1 first wire-contract tranche and EVENT sequencing/generation tranche COMPLETE; reconnect/rebase and outbound backpressure remain follow-up tranches.
 
 ## NS-IPC-101 — Freeze v1 wire contract
 
@@ -88,7 +88,7 @@ Status: Step 2.1 first wire-contract tranche COMPLETE; event/reconnect/backpress
 - static analysis green
 
 **Known follow-up constraint**
-- The current server accept loop remains single-client/serial and the accepted-client read path still inherits the bounded idle timeout introduced for v0 safety. This is acceptable for the Step 2.1 handshake tranche but MUST be revisited before EVENT delivery/long-lived production sessions are promoted.
+- The current server accept loop remains single-client/serial and the accepted-client read path still inherits the bounded idle timeout introduced for v0 safety. This is acceptable for the Step 2.1 handshake tranche but MUST be revisited before continuous EVENT delivery/long-lived production sessions are promoted.
 
 ---
 
@@ -147,21 +147,42 @@ Status: Step 2.1 first wire-contract tranche COMPLETE; event/reconnect/backpress
 
 ## NS-IPC-107 — Event sequencing and generation
 
-**Goal**: add server event envelopes with deterministic ordering metadata.
+**Status**: DONE
+
+**Goal**: add server event envelopes with deterministic ordering metadata without prematurely enabling an unbounded asynchronous event stream.
 
 **Deliverables**
-- EVENT message support
-- generation lifecycle
-- per-generation monotonic seq
-- subscription surface
+- `src/ipc/network_ipc_v1_event.{h,cpp}` server-owned `EventSequencer`
+- EVENT message encoding with process generation and monotonic per-generation `seq`
+- READY advertises `events`
+- explicit session-scoped `network.events.subscribe` request
+- first successful subscription emits one `network.events.subscribed` control EVENT after its correlated RESPONSE
+- duplicate subscription is idempotent and does not emit a duplicate control EVENT
+- `tests/network_ipc_v1_event_test.cpp` generation/sequence contract test
+- `tests/ipc_v1_event_test.py` real Unix-socket reconnect/generation/sequence regression
+- strict and ASan/UBSan CI gates for EVENT sequencing regression
 
 **Exit criteria**
-- monotonic seq contract tests
-- reconnect creates a new session and does not claim old-session continuity
+- EVENT envelope unit test green
+- READY generation equals EVENT generation
+- server-owned EVENT `seq` strictly increases within one generation, including across reconnect sessions
+- reconnect creates a new `sessionId` and does not claim old-session delivery continuity
+- existing full v1 wire contract remains green
+- v0/v1 coexistence remains green
+- existing v0 stalled-client regression remains green
+- governance, strict build, ASan/UBSan, and static analysis green
+
+**Boundary retained for follow-up**
+- NS-IPC-107 emits only one synchronous subscription control EVENT per session and introduces no outbound EVENT queue.
+- Continuous/unsolicited state EVENT delivery remains disabled until NS-IPC-109 defines bounded slow-client/backpressure behavior.
+- Authoritative reconnect/snapshot rebase remains NS-IPC-108.
+- The current single-client/serial accept loop and short accepted-client idle timeout remain a known production constraint for long-lived EVENT sessions.
 
 ---
 
 ## NS-IPC-108 — Reconnect / snapshot rebase
+
+**Status**: NEXT
 
 **Goal**: make consumer recovery deterministic across service/client restart and event gaps.
 

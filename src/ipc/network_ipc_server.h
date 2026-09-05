@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "ipc/network_ipc_v1_event.h"
+
 namespace network_service {
 
 class NetworkDaemon;
@@ -36,6 +38,7 @@ private:
     bool running_ = false;
     std::uint64_t generation_ = 1;
     std::uint64_t next_session_sequence_ = 1;
+    ipc_v1::EventSequencer event_sequencer_;
 };
 
 } // namespace network_service

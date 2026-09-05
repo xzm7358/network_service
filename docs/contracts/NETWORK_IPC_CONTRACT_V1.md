@@ -65,7 +65,7 @@ After successful negotiation the server sends READY:
   "service": "network_service",
   "sessionId": "opaque-session-id",
   "generation": 1,
-  "capabilities": ["request-response"]
+  "capabilities": ["request-response", "events"]
 }
 ```
 
@@ -123,24 +123,66 @@ EVENT payloads are server-originated and MUST carry both `generation` and monoto
 }
 ```
 
-A sequence gap, generation change, or reconnect invalidates the consumer's incremental projection. The consumer MUST obtain an authoritative snapshot and then consume only events newer than the rebased point.
+`generation` is owned by the server process. EVENT sequence allocation is also server-owned: `seq` MUST strictly increase for every encoded EVENT in the same generation, including across client session reconnects while the server process remains in that generation. A reconnect still creates a new `sessionId`, and clients MUST NOT infer delivery continuity merely because the generation is unchanged.
 
-Event subscription and full event surface are Step 2.1 follow-up work; the sequencing rules are frozen here so later implementation cannot choose incompatible semantics.
+### 6.1 Initial subscription surface
+
+A client opts into the v1 event surface with an explicit REQUEST after READY:
+
+```json
+{
+  "requestId": 100,
+  "method": "network.events.subscribe",
+  "params": {}
+}
+```
+
+The successful RESPONSE is:
+
+```json
+{
+  "requestId": 100,
+  "status": 200,
+  "result": {
+    "subscribed": true
+  }
+}
+```
+
+On the first successful subscription in a session, the server sends one control EVENT after the correlated RESPONSE:
+
+```json
+{
+  "event": "network.events.subscribed",
+  "generation": 1,
+  "seq": 1,
+  "payload": {}
+}
+```
+
+The subscription REQUEST is idempotent within a session. Repeating it returns a successful RESPONSE but MUST NOT emit a second `network.events.subscribed` control EVENT for that same session.
+
+This initial control EVENT establishes executable generation/sequence semantics only. It is **not** an authoritative network-state snapshot and does not enable a continuous asynchronous state-change stream. Dynamic state EVENT production is promoted only together with the bounded outbound/backpressure rules owned by NS-IPC-109.
+
+A sequence gap, generation change, or reconnect invalidates the consumer's incremental projection. The consumer MUST obtain an authoritative snapshot and then consume only events newer than the rebased point. The actual snapshot-rebase flow remains NS-IPC-108.
 
 ## 7. Reconnect semantics
 
 - A transport disconnect terminates the session and all outstanding requests.
 - `sessionId` is not reusable across server restart/reconnect.
 - After reconnect the client performs HELLO -> READY again.
+- Event subscription is session-scoped and MUST be repeated after reconnect.
 - State reconciliation is authoritative snapshot rebase, then newer events.
-- Clients MUST NOT assume event continuity across sessions.
+- Clients MUST NOT assume event delivery continuity across sessions.
 
 ## 8. Backpressure and bounds
 
 - Maximum payload: 64 KiB.
 - Readers MUST be bounded and interruptible.
 - A partial/stalled client MUST NOT block service shutdown indefinitely.
-- Implementations MUST bound queued outbound data; overload behavior must become explicit before EVENT delivery is enabled.
+- Implementations MUST bound queued outbound data; overload behavior must become explicit before continuous asynchronous EVENT delivery is enabled.
+
+NS-IPC-107 emits at most one synchronous `network.events.subscribed` control EVENT per session and does not introduce an outbound EVENT queue. Continuous/unsolicited event delivery remains disabled until NS-IPC-109 defines and verifies the bounded slow-client/backpressure policy.
 
 The existing v0 stalled-client regression remains required during migration.
 
@@ -176,5 +218,6 @@ The first executable tranche freezes these invariants:
 8. RESPONSE echoes non-zero uint64 `requestId`.
 9. invalid magic/version/type/flags never reaches command dispatch.
 10. valid v0 and valid v1 traffic remain disjoint under the frozen four-octet protocol selector.
+11. first event subscription produces an EVENT whose generation matches READY and whose server-owned sequence is monotonic within the generation.
 
-Event delivery, generation-gap reconciliation, multi-outstanding request concurrency, and explicit outbound-backpressure behavior are subsequent tranches.
+Authoritative snapshot rebase, continuous dynamic event delivery, multi-outstanding request concurrency, and explicit outbound-backpressure behavior remain subsequent tranches.

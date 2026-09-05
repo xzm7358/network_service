@@ -49,6 +49,10 @@ jobs:
         run: >-
           python3 tests/ipc_v1_contract_test.py
           --binary ./app/smartcontrol/dnake/bin/network_service
+      - name: IPC v1 EVENT sequencing regression
+        run: >-
+          python3 tests/ipc_v1_event_test.py
+          --binary ./app/smartcontrol/dnake/bin/network_service
 
   asan-ubsan-build:
     runs-on: ubuntu-latest
@@ -82,6 +86,11 @@ jobs:
           env ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1
           python3 tests/ipc_v1_contract_test.py
           --binary ./app/smartcontrol/dnake/bin/network_service
+      - name: IPC v1 EVENT sequencing regression under sanitizers
+        run: >-
+          env ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1
+          python3 tests/ipc_v1_event_test.py
+          --binary ./app/smartcontrol/dnake/bin/network_service
       - name: Non-mutating CLI smoke under sanitizers
         shell: bash
         run: |
@@ -111,6 +120,7 @@ jobs:
             src/service/network_daemon.cpp \
             src/ipc/network_ipc_server.cpp \
             src/ipc/network_ipc_v1_codec.cpp \
+            src/ipc/network_ipc_v1_event.cpp \
             src/ipc/network_ipc_v1_session.cpp \
             src/platform/interface_snapshot.cpp \
             src/config/ethernet_config.cpp \

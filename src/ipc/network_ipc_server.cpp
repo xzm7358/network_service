@@ -133,7 +133,8 @@ static bool starts_with_v1_magic(const std::vector<std::uint8_t> &data) {
 
 NetworkIpcServer::NetworkIpcServer(NetworkDaemon &daemon)
     : daemon_(daemon),
-      generation_(make_server_generation()) {
+      generation_(make_server_generation()),
+      event_sequencer_(generation_) {
     int pipefd[2] = {-1, -1};
     if (pipe(pipefd) == 0) {
         wake_read_fd_ = pipefd[0];
@@ -420,6 +421,11 @@ void NetworkIpcServer::handle_v1_client(int client_fd, const std::vector<std::ui
             const ipc_v1::Frame frame = decoder.take_frame();
             const ipc_v1::Session::HandleResult result = session.handle_frame(frame);
             if (!result.response.empty() && !send_all(client_fd, result.response)) return false;
+            if (result.server_action == ipc_v1::Session::ServerAction::EmitEventsSubscribed) {
+                const std::vector<std::uint8_t> event =
+                    event_sequencer_.encode_event("network.events.subscribed", "{}");
+                if (event.empty() || !send_all(client_fd, event)) return false;
+            }
             if (result.close_after_send) return false;
         }
         return true;
