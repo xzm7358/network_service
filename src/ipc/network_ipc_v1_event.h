@@ -14,6 +14,7 @@ public:
 
     std::uint64_t generation() const;
     std::uint64_t next_sequence() const;
+    std::uint64_t last_sequence() const;
 
     std::vector<std::uint8_t> encode_event(const std::string &event_name,
                                            const std::string &payload_json);
