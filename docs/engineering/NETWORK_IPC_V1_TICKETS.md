@@ -1,6 +1,6 @@
 # Network IPC v1 — Executable Tickets
 
-Status: Step 2.1 first wire-contract, EVENT sequencing/generation, and reconnect/snapshot-rebase tranches COMPLETE; bounded outbound backpressure remains the next protocol tranche.
+Status: Step 2.1 wire-contract, EVENT sequencing/generation, reconnect/snapshot-rebase, and bounded outbound backpressure tranches COMPLETE. Production consumer migration and real-target evidence remain follow-up work.
 
 ## NS-IPC-101 — Freeze v1 wire contract
 
@@ -59,7 +59,6 @@ Status: Step 2.1 first wire-contract, EVENT sequencing/generation, and reconnect
 
 **Constraints**
 - no NetworkDaemon business behavior change
-- no event implementation yet
 - preserve v0 path
 
 **Exit criteria**
@@ -88,7 +87,7 @@ Status: Step 2.1 first wire-contract, EVENT sequencing/generation, and reconnect
 - static analysis green
 
 **Known follow-up constraint**
-- The current server accept loop remains single-client/serial and the accepted-client read path still inherits the bounded idle timeout introduced for v0 safety. This is acceptable for the Step 2.1 handshake tranche but MUST be revisited before continuous EVENT delivery/long-lived production sessions are promoted.
+- The current server accept loop remains single-client/serial and the accepted-client read path still inherits the bounded idle timeout introduced for v0 safety. This remains a production constraint for long-lived EVENT sessions even after bounded outbound backpressure is implemented.
 
 ---
 
@@ -173,10 +172,10 @@ Status: Step 2.1 first wire-contract, EVENT sequencing/generation, and reconnect
 - governance, strict build, ASan/UBSan, and static analysis green
 
 **Boundary retained for follow-up**
-- NS-IPC-107 emits only one synchronous subscription control EVENT per session and introduces no outbound EVENT queue.
-- Continuous/unsolicited state EVENT delivery remains disabled until NS-IPC-109 defines bounded slow-client/backpressure behavior.
-- Authoritative reconnect/snapshot rebase is now implemented by NS-IPC-108.
-- The current single-client/serial accept loop and short accepted-client idle timeout remain a known production constraint for long-lived EVENT sessions.
+- NS-IPC-107 still emits only one subscription control EVENT per session.
+- Bounded outbound transport is now supplied by NS-IPC-109, but a continuous dynamic network-state EVENT producer is not introduced by these tickets.
+- Authoritative reconnect/snapshot rebase is implemented by NS-IPC-108.
+- The current single-client/serial accept loop and short accepted-client idle timeout remain production constraints for long-lived EVENT sessions.
 
 ---
 
@@ -210,26 +209,46 @@ Status: Step 2.1 first wire-contract, EVENT sequencing/generation, and reconnect
 - governance, strict build, ASan/UBSan, and static analysis green
 
 **Boundary retained for follow-up**
-- Continuous/unsolicited state EVENT delivery is still disabled.
-- NS-IPC-108 introduces no outbound EVENT queue.
-- Subscription/snapshot ordering for continuous delivery must be paired with the bounded queue/backpressure semantics in NS-IPC-109 so state changes cannot fall into an unobservable rebase window.
+- Bounded outbound transport is now implemented by NS-IPC-109.
+- Continuous dynamic state EVENT production and production SmartControl consumption remain separate follow-up work.
 
 ---
 
 ## NS-IPC-109 — Bounded outbound backpressure
 
-**Status**: NEXT
+**Status**: DONE
 
-**Goal**: prevent slow clients from consuming unbounded memory or blocking the service.
+**Goal**: prevent slow clients from consuming unbounded outbound memory or indefinitely blocking the service.
 
 **Deliverables**
-- bounded outbound queue
-- explicit overload policy/diagnostic
-- slow-reader regression
+- `src/ipc/network_ipc_v1_outbound.{h,cpp}` with bounded `OutboundQueue` and `OutboundWriter`
+- dual queue bound: logical frame count plus encoded bytes
+- current host safety defaults: 32 frames and `4 * (maximum encoded v1 frame size)` bytes
+- exact partial-send byte accounting
+- non-blocking `send` plus `poll(POLLOUT)` writer
+- 1000 ms write-stall deadline
+- wake-pipe interrupt of blocked outbound wait
+- explicit `IPC_V1_OUTBOUND_OVERFLOW` and `IPC_V1_OUTBOUND_WRITE_STALLED` diagnostics
+- overload policy: terminate whole v1 session; never silently drop one RESPONSE/EVENT
+- reconnect -> HELLO/READY -> authoritative snapshot rebase recovery after overload
+- `tests/network_ipc_v1_outbound_test.cpp` deterministic queue/deadline/wake tests
+- `tests/ipc_v1_backpressure_test.py` real Unix-socket slow-reader eviction/recovery regression
+- strict and ASan/UBSan CI gates; static analyzer includes outbound implementation
 
 **Exit criteria**
-- deterministic queue bound test
-- shutdown remains interruptible
+- queue cannot exceed configured frame or byte bound
+- failed enqueue leaves existing queue accounting intact
+- partial writes reduce queued bytes exactly
+- deterministic socketpair test proves slow-writer deadline
+- deterministic socketpair test proves wake/shutdown interruptibility
+- real non-reading client is evicted within a bounded interval and emits the slow-client diagnostic
+- a fresh client can reconnect and perform authoritative snapshot rebase after eviction
+- full v1 wire contract, EVENT sequencing, reconnect/rebase, v0/v1 coexistence, and v0 stalled-client regressions remain green
+- governance, strict build, ASan/UBSan, and static analysis green
+
+**Resource-budget boundary**
+- The current numeric ceilings are host-verifiable implementation safety defaults, not real wall-panel resource evidence.
+- Real-target measurement may tighten the ceilings, but boundedness and explicit overload behavior are contractual.
 
 ---
 
