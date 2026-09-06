@@ -1,9 +1,0 @@
-network_ipc_v1_codec 1 0.00167039
-network_ipc_v1_event 1 0.00141407
-network_ipc_v1_outbound 1 0.0219497
-network_ipc_v1_rebase 1 0.00123148
-network_ipc_v1_session 1 0.00119089
-wifi_scan_lifecycle 1 0.00106892
-network_state_change_detector 1 0.00106599
-network_state_event_integration 1 3.00198
----

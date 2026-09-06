@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -Wl,--dependency-file=CMakeFiles/wifi_scan_lifecycle_test.dir/link.d CMakeFiles/wifi_scan_lifecycle_test.dir/tests/wifi_scan_lifecycle_test.cpp.o CMakeFiles/wifi_scan_lifecycle_test.dir/src/service/wifi_scan_lifecycle.cpp.o -o wifi_scan_lifecycle_test
