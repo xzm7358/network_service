@@ -377,19 +377,8 @@ bool wifi_set_autoconnect(const std::string &iface,
     return wpa_cli_ok(iface, "save_config", error);
 }
 
-std::vector<WifiApRecord> wifi_scan(const std::string &iface, std::string &error) {
+static std::vector<WifiApRecord> parse_scan_results(const std::string &output) {
     std::vector<WifiApRecord> records;
-    if (!is_safe_iface(iface)) {
-        error = "invalid wifi iface";
-        return records;
-    }
-    if (!run_command("ifconfig " + iface + " up", error)) {
-        return records;
-    }
-    (void)wpa_cli_ok(iface, "scan", error);
-    usleep(1200 * 1000);
-
-    std::string output = read_command("wpa_cli -i " + iface + " scan_results 2>/dev/null", error);
     std::istringstream input(output);
     std::string line;
     bool header = true;
@@ -411,6 +400,43 @@ std::vector<WifiApRecord> wifi_scan(const std::string &iface, std::string &error
         records.push_back(record);
     }
     return records;
+}
+
+bool wifi_scan_start(const std::string &iface, std::string &error) {
+    error.clear();
+    if (!is_safe_iface(iface)) {
+        error = "invalid wifi iface";
+        return false;
+    }
+    if (!run_command("ifconfig " + iface + " up", error)) {
+        return false;
+    }
+    return wpa_cli_ok(iface, "scan", error);
+}
+
+std::vector<WifiApRecord> wifi_scan_results(const std::string &iface, std::string &error) {
+    error.clear();
+    if (!is_safe_iface(iface)) {
+        error = "invalid wifi iface";
+        return {};
+    }
+    std::string output = read_command("wpa_cli -i " + iface + " scan_results 2>/dev/null", error);
+    if (!error.empty() && output.empty()) return {};
+    return parse_scan_results(output);
+}
+
+std::vector<WifiApRecord> wifi_scan(const std::string &iface, std::string &error) {
+    std::vector<WifiApRecord> records;
+    if (!is_safe_iface(iface)) {
+        error = "invalid wifi iface";
+        return records;
+    }
+    if (!run_command("ifconfig " + iface + " up", error)) {
+        return records;
+    }
+    (void)wpa_cli_ok(iface, "scan", error);
+    usleep(1200 * 1000);
+    return wifi_scan_results(iface, error);
 }
 
 std::vector<WifiSavedNetwork> wifi_list_saved(const std::string &iface, std::string &error) {

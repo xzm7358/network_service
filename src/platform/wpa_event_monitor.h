@@ -25,6 +25,13 @@ struct WpaEventSnapshot {
     uint32_t connect_events = 0;
     uint32_t disconnect_events = 0;
     uint32_t dhcp_requests = 0;
+    uint32_t scan_started_events = 0;
+    uint32_t scan_result_events = 0;
+    uint32_t scan_failed_events = 0;
+    uint64_t event_sequence = 0;
+    uint64_t last_scan_started_sequence = 0;
+    uint64_t last_scan_result_sequence = 0;
+    uint64_t last_scan_failed_sequence = 0;
     std::string last_event;
     std::string last_ssid;
     std::string last_bssid;

@@ -122,6 +122,23 @@ def test_boolean_schema_is_strict(path: Path):
             raise AssertionError(f"wrong boolean schema error: {bad}")
 
 
+def test_scan_status_is_immediate_and_explicit(path: Path):
+    with connect_ready(path) as sock:
+        started = time.monotonic()
+        response = request(sock, 45, "wifi.scan.status", {})
+        elapsed = time.monotonic() - started
+        if elapsed > 0.5:
+            raise AssertionError(f"wifi.scan.status blocked for {elapsed:.3f}s")
+        if response.get("status") != 200:
+            raise AssertionError(f"wifi.scan.status failed: {response}")
+        result = response.get("result") or {}
+        if result.get("state") != "idle" or result.get("scanId") != 0:
+            raise AssertionError(f"unexpected idle scan state: {response}")
+        results = result.get("results") or {}
+        if results.get("count") != 0 or results.get("aps") != []:
+            raise AssertionError(f"idle scan results must be empty: {response}")
+
+
 def test_unknown_method_correlated_404(path: Path):
     with connect_ready(path) as sock:
         response = request(sock, 51, "does.not.exist", {})
@@ -143,6 +160,7 @@ def main():
         test_read_dispatch_and_persistent_session,
         test_write_method_schema_rejected_without_session_teardown,
         test_boolean_schema_is_strict,
+        test_scan_status_is_immediate_and_explicit,
         test_unknown_method_correlated_404,
     ]
 

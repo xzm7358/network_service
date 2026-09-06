@@ -155,6 +155,7 @@ jobs:
             src/main.cpp \
             src/service/network_daemon.cpp \
             src/service/network_state_change_detector.cpp \
+            src/service/wifi_scan_lifecycle.cpp \
             src/ipc/network_ipc_server.cpp \
             src/ipc/network_ipc_v1_business_dispatch.cpp \
             src/ipc/network_ipc_v1_codec.cpp \
