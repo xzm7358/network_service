@@ -71,10 +71,12 @@ static void overlay_wpa_with_live_snapshot(WpaEventSnapshot &events,
 NetworkDaemon::NetworkDaemon(std::string eth_iface,
                              std::string wifi_iface,
                              std::string config_dir,
-                             std::string event_dir)
+                             std::string event_dir,
+                             SnapshotProvider snapshot_provider)
     : eth_iface_(std::move(eth_iface)),
       wifi_iface_(std::move(wifi_iface)),
       config_dir_(std::move(config_dir)),
+      snapshot_provider_(std::move(snapshot_provider)),
       wpa_monitor_(new WpaEventMonitor(wifi_iface_, std::move(event_dir))) {
     wpa_monitor_->start();
 }
@@ -82,6 +84,7 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
 NetworkDaemon::~NetworkDaemon() = default;
 
 NetworkSnapshot NetworkDaemon::snapshot() const {
+    if (snapshot_provider_) return snapshot_provider_();
     return read_live_snapshot(eth_iface_.c_str(), wifi_iface_.c_str());
 }
 
