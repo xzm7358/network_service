@@ -206,9 +206,7 @@ replace_once(
 ''',
 )
 
-# Replace deterministic test wholesale to encode event ordering and late-event regression.
-path = ROOT / "tests/wifi_scan_lifecycle_test.cpp"
-path.write_text(r'''#include "service/wifi_scan_lifecycle.h"
+(ROOT / "tests/wifi_scan_lifecycle_test.cpp").write_text(r'''#include "service/wifi_scan_lifecycle.h"
 
 #include <cassert>
 #include <chrono>
@@ -313,8 +311,6 @@ int main() {
     assert(timed_out.state == WifiScanState::Failed);
     assert(timed_out.error == "timeout");
 
-    // A completion from the timed-out scan may arrive after the next start.
-    // It must not complete the new generation until its own STARTED marker exists.
     auto fourth = lifecycle.start();
     assert(fourth.scan_id == 4);
     emit_completed();
@@ -359,17 +355,6 @@ replace_once(
     '''NetworkService observes `CTRL-EVENT-SCAN-STARTED`, `CTRL-EVENT-SCAN-RESULTS`, and `CTRL-EVENT-SCAN-FAILED` through its existing `WpaEventMonitor`. The scan lifecycle itself owns no thread and performs no fixed sleep. Result collection occurs only after the monitor observes scan completion.
 
 Every observed WPA event carries a process-local monotonic sequence marker. A terminal scan event is accepted only when its sequence is later than a `SCAN-STARTED` marker that is itself later than the baseline captured before the current start command. This generation fence prevents a late result from a timed-out scan from completing a subsequent scan generation.
-''',
-)
-
-replace_once(
-    ".github/workflows/eep-ci.yml",
-    '''            src/service/network_state_change_detector.cpp \\
-            src/ipc/network_ipc_server.cpp \\
-''',
-    '''            src/service/network_state_change_detector.cpp \\
-            src/service/wifi_scan_lifecycle.cpp \\
-            src/ipc/network_ipc_server.cpp \\
 ''',
 )
 
