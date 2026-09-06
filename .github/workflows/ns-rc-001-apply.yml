@@ -1,0 +1,40 @@
+name: NS-RC-001 bounded patch
+
+on:
+  push:
+    branches:
+      - rc/nonblocking-wifi-scan
+    paths:
+      - '.github/workflows/ns-rc-001-apply.yml'
+      - 'tools/ns_rc_001_apply.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rc/nonblocking-wifi-scan
+          fetch-depth: 0
+      - name: Apply bounded NS-RC-001 patch
+        run: python3 tools/ns_rc_001_apply.py
+      - name: Verify diff shape
+        run: git diff --check
+      - name: Configure host tests
+        run: cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug
+      - name: Build host tests
+        run: cmake --build build --parallel
+      - name: Run CTest regressions
+        run: ctest --test-dir build --output-on-failure
+      - name: Verify v1 business dispatch surface
+        run: python3 tests/ipc_v1_business_dispatch_test.py --binary app/smartcontrol/dnake/bin/network_service
+      - name: Commit implementation and self-cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "NS-RC-001: add non-blocking Wi-Fi scan lifecycle"
+          git push origin HEAD:rc/nonblocking-wifi-scan
