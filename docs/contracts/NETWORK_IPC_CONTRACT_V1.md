@@ -119,13 +119,19 @@ EVENT payloads are server-originated and MUST carry both `generation` and monoto
   "event": "network.state.changed",
   "generation": 1,
   "seq": 7,
-  "payload": {}
+  "payload": {
+    "changed": ["wifi", "route", "dns"]
+  }
 }
 ```
 
-`generation` is owned by the server process. EVENT sequence allocation is also server-owned: `seq` MUST strictly increase for every encoded EVENT in the same generation, including across client session reconnects while the server process remains in that generation. A reconnect still creates a new `sessionId`, and clients MUST NOT infer delivery continuity merely because the generation is unchanged.
+`generation` is owned by the server process. EVENT sequence allocation is also server-owned: `seq` MUST strictly increase for every globally allocated EVENT in the same generation, including across client session reconnects while the server process remains in that generation. A reconnect still creates a new `sessionId`, and clients MUST NOT infer delivery continuity merely because the generation is unchanged.
 
-### 6.1 Initial subscription surface
+A globally allocated EVENT has one encoded `generation`/`seq`. Every currently READY v1 session that has successfully subscribed is offered that same EVENT. The server MUST NOT allocate a sequence value for a control or state EVENT and make that sequence invisible to another already-subscribed healthy session; doing so would create an artificial consumer gap.
+
+Sequence allocation is a generation-wide watermark, not a count of successful deliveries. A state transition advances the global sequencer even when there are currently no subscribed clients. Consequently a later authoritative `network.snapshot` can report a `snapshotSeq` that covers transitions that no session received incrementally.
+
+### 6.1 Subscription surface
 
 A client opts into the v1 event surface with an explicit REQUEST after READY:
 
@@ -149,7 +155,7 @@ The successful RESPONSE is:
 }
 ```
 
-On the first successful subscription in a session, the server sends one control EVENT after the correlated RESPONSE:
+On the first successful subscription in a session, the server allocates one control EVENT after the correlated RESPONSE:
 
 ```json
 {
@@ -160,9 +166,45 @@ On the first successful subscription in a session, the server sends one control 
 }
 ```
 
-The subscription REQUEST is idempotent within a session. Repeating it returns a successful RESPONSE but MUST NOT emit a second `network.events.subscribed` control EVENT for that same session.
+The initiating session receives this EVENT after its correlated subscription RESPONSE. Because the sequence is generation-global, every other currently subscribed healthy session is also offered the same control EVENT and sequence value. The subscription REQUEST is idempotent within a session: repeating it returns a successful RESPONSE but MUST NOT allocate a second `network.events.subscribed` control EVENT for that same session.
 
-This initial control EVENT establishes executable generation/sequence semantics only. It is **not** an authoritative network-state snapshot. Continuous dynamic state EVENT production remains a separate promotion decision even though the bounded outbound transport is now available.
+`network.events.subscribed` is sequencing/control evidence only. It is **not** an authoritative network-state snapshot and MUST NOT be interpreted as a network-state transition.
+
+### 6.2 Dynamic network-state EVENT
+
+NetworkService publishes the first dynamic producer EVENT as exactly:
+
+```json
+{
+  "event": "network.state.changed",
+  "generation": 1,
+  "seq": 2,
+  "payload": {
+    "changed": ["wifi", "route", "dns"]
+  }
+}
+```
+
+The payload is invalidation metadata, not an incremental state patch. Consumers MUST obtain or retain authoritative state through `network.snapshot`; they MUST NOT infer complete interface state from the `changed` list.
+
+The allowed `changed` categories and stable encoding order are:
+
+1. `eth`
+2. `wifi`
+3. `route`
+4. `dns`
+
+Producer state-change semantics are:
+
+- the first authoritative snapshot observation establishes the producer's internal comparison baseline and emits no dynamic EVENT;
+- identical consecutive semantic snapshots emit no dynamic EVENT;
+- one observed transition allocates exactly one `network.state.changed` EVENT even when several categories changed;
+- `eth` covers semantic Ethernet interface state such as existence/up/carrier/address/default-route fields;
+- `wifi` covers semantic Wi-Fi interface state including connection/address/SSID and `signal_bars`;
+- raw `signal_dbm` movement alone MUST NOT emit a state EVENT, to avoid event churn from RSSI noise;
+- `route` covers route policy, primary-interface selection, and online state;
+- `dns` covers DNS policy, availability, and authoritative DNS address state;
+- state observation runs on a bounded reactor-owned cadence. The current host implementation cadence is 250 ms; that value is an implementation safety/default cadence, not a hard real-time wire latency guarantee.
 
 A sequence gap, generation change, or reconnect invalidates the consumer's incremental projection. The consumer MUST perform the authoritative snapshot rebase defined below before trusting incremental events again.
 
@@ -212,6 +254,7 @@ Rules:
 7. The first accepted incremental EVENT after a baseline MUST have `seq == snapshotSeq + 1`; every later accepted EVENT MUST likewise be exactly the next sequence.
 8. A forward sequence jump (`seq > lastAcceptedSeq + 1`) is a gap and MUST invalidate the baseline and trigger a new snapshot rebase.
 9. A reconnect always invalidates the previous session's projection even when READY reports the same server generation. A new session MUST establish a fresh snapshot baseline before relying on incremental delivery.
+10. A state transition may be reflected in the authoritative snapshot immediately before the observer allocates its dynamic EVENT sequence. Such a later EVENT remains a valid invalidation signal; a redundant snapshot refresh is acceptable and MUST converge on the authoritative state.
 
 ## 8. Backpressure and bounds
 
@@ -220,15 +263,16 @@ Rules:
 - Every v1 connection MUST use a bounded outbound queue; an implementation MUST NOT accumulate unbounded RESPONSE/EVENT bytes for a slow client.
 - Queue accounting MUST bound both logical frame count and encoded bytes, and partial writes MUST reduce the accounted byte count exactly.
 - The current host-verifiable default ceiling is **32 queued frames** and **4 × maximum encoded v1 frame bytes**. These are implementation safety defaults, not real-target resource-budget evidence. Real-target evidence may tighten these values but MUST NOT remove boundedness.
-- Queue overflow MUST NOT silently drop an individual RESPONSE or EVENT. The session is terminated as overloaded; incremental delivery continuity is invalidated.
+- Queue overflow MUST NOT silently drop an individual RESPONSE or EVENT. The affected session is terminated as overloaded; incremental delivery continuity for that session is invalidated.
+- Failure of one subscribed client's queue MUST NOT prevent the same globally allocated EVENT from being offered to other healthy subscribed clients.
 - v1 socket writes MUST be non-blocking or otherwise deadline-bounded. The current implementation write-stall deadline is **1000 ms**.
-- A write stall or queue overflow terminates the v1 session. Recovery is a new connection followed by HELLO -> READY -> authoritative `network.snapshot` rebase before incremental EVENTs are trusted.
+- A write stall or queue overflow terminates the affected v1 session. Recovery is a new connection followed by HELLO -> READY -> authoritative `network.snapshot` rebase before incremental EVENTs are trusted.
 - Service shutdown/wake MUST interrupt an outbound wait; a slow client MUST NOT indefinitely delay process termination.
 - Overload/slow-client termination MUST emit an explicit diagnostic suitable for regression evidence.
 
 The v0 compatibility path is not redefined by this section; the existing bounded v0 stalled-client regression remains required during migration.
 
-The bounded writer makes future continuous EVENT delivery safe from unbounded outbound memory growth, but NS-IPC-109 by itself does **not** introduce a new dynamic network-state EVENT producer or remove the current single-client/serial accept-loop constraint.
+NS-IPC-109 established bounded outbound delivery. NS-IPC-111 subsequently replaced the former serial accepted-client lifecycle with a bounded multi-client `poll()` reactor. NS-IPC-112 promotes dynamic `network.state.changed` production on top of those existing bounds; it does not weaken queue, write-stall, reconnect, or rebase requirements.
 
 ## 9. Compatibility and protocol-selection rule
 
@@ -266,5 +310,10 @@ The executable contract currently freezes these invariants:
 12. reconnect snapshot rebase returns READY generation plus a sequence watermark and authoritative snapshot.
 13. generation changes, sequence gaps, stale EVENTs, and exact-next EVENTs have deterministic rebase-state decisions.
 14. outbound queue frame/byte bounds, partial-send accounting, write-stall deadline, wake interruption, and reconnect/rebase recovery are executable regressions.
+15. semantic network-state comparison is deterministic; identical snapshots and raw RSSI-only changes do not emit dynamic state changes.
+16. a real authoritative state transition advances the generation-global EVENT watermark even with no subscriber, and a later snapshot reports that watermark.
+17. one state transition is encoded once and delivered with the same sequence to all healthy subscribed sessions.
+18. a new subscriber's globally sequenced control EVENT is visible to existing subscribed sessions, preventing artificial sequence gaps.
+19. dynamic EVENT `seq` and authoritative `network.snapshot.snapshotSeq` remain aligned after rebase.
 
-Multi-outstanding request concurrency, production SmartControl migration, dynamic network-state EVENT production, and real-target resource/HIL evidence remain subsequent work.
+Multi-outstanding request concurrency, v0 removal, and real-target resource/HIL evidence remain subsequent work.
