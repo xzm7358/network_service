@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ipc/network_ipc_v1_codec.h"
@@ -26,6 +27,10 @@ public:
     };
 
     struct HandleResult {
+        HandleResult() = default;
+        HandleResult(std::vector<std::uint8_t> encoded_response, bool close)
+            : response(std::move(encoded_response)), close_after_send(close) {}
+
         std::vector<std::uint8_t> response;
         bool close_after_send = false;
         ServerAction server_action = ServerAction::None;
