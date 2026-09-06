@@ -6,12 +6,12 @@ namespace network_service {
 
 WifiScanLifecycle::WifiScanLifecycle(StartFn start_fn,
                                      ResultsFn results_fn,
-                                     CountersFn counters_fn,
+                                     EventsFn events_fn,
                                      ClockFn clock_fn,
                                      std::chrono::milliseconds timeout)
     : start_fn_(std::move(start_fn)),
       results_fn_(std::move(results_fn)),
-      counters_fn_(std::move(counters_fn)),
+      events_fn_(std::move(events_fn)),
       clock_fn_(std::move(clock_fn)),
       timeout_(timeout.count() > 0 ? timeout : std::chrono::milliseconds(5000)) {}
 
@@ -19,8 +19,8 @@ WifiScanLifecycle::Clock::time_point WifiScanLifecycle::now() const {
     return clock_fn_ ? clock_fn_() : Clock::now();
 }
 
-WifiScanEventCounters WifiScanLifecycle::counters() const {
-    return counters_fn_ ? counters_fn_() : WifiScanEventCounters{};
+WifiScanEventMarkers WifiScanLifecycle::events() const {
+    return events_fn_ ? events_fn_() : WifiScanEventMarkers{};
 }
 
 void WifiScanLifecycle::fail(std::string error) {
@@ -39,7 +39,7 @@ WifiScanStatus WifiScanLifecycle::start() {
     state_ = WifiScanState::Scanning;
     error_.clear();
     records_.clear();
-    baseline_ = counters();
+    baseline_ = events();
     deadline_ = now() + timeout_;
 
     std::string error;
@@ -54,13 +54,16 @@ WifiScanStatus WifiScanLifecycle::poll() {
         return status();
     }
 
-    const WifiScanEventCounters current = counters();
-    if (current.failed != baseline_.failed) {
+    const WifiScanEventMarkers current = events();
+    const bool current_scan_started = current.started_sequence > baseline_.sequence;
+    if (current_scan_started &&
+        current.failed_sequence > current.started_sequence &&
+        current.failed_sequence > current.completed_sequence) {
         fail("scan_failed");
         return status();
     }
 
-    if (current.completed != baseline_.completed) {
+    if (current_scan_started && current.completed_sequence > current.started_sequence) {
         std::string error;
         std::vector<WifiApRecord> records = results_fn_ ? results_fn_(error) : std::vector<WifiApRecord>{};
         if (!error.empty()) {

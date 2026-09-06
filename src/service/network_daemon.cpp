@@ -89,10 +89,12 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
         },
         [this]() {
             const WpaEventSnapshot events = wpa_monitor_->snapshot();
-            WifiScanEventCounters counters;
-            counters.completed = events.scan_result_events;
-            counters.failed = events.scan_failed_events;
-            return counters;
+            WifiScanEventMarkers markers;
+            markers.sequence = events.event_sequence;
+            markers.started_sequence = events.last_scan_started_sequence;
+            markers.completed_sequence = events.last_scan_result_sequence;
+            markers.failed_sequence = events.last_scan_failed_sequence;
+            return markers;
         }));
 }
 

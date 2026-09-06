@@ -11,7 +11,7 @@ using namespace network_service;
 int main() {
     using Clock = WifiScanLifecycle::Clock;
     Clock::time_point now{};
-    WifiScanEventCounters counters;
+    WifiScanEventMarkers events;
     int start_calls = 0;
     int result_calls = 0;
     bool start_ok = true;
@@ -26,6 +26,19 @@ int main() {
     ap.ssid = "Lab";
     fake_results.push_back(ap);
 
+    auto emit_started = [&]() {
+        ++events.sequence;
+        events.started_sequence = events.sequence;
+    };
+    auto emit_completed = [&]() {
+        ++events.sequence;
+        events.completed_sequence = events.sequence;
+    };
+    auto emit_failed = [&]() {
+        ++events.sequence;
+        events.failed_sequence = events.sequence;
+    };
+
     WifiScanLifecycle lifecycle(
         [&](std::string &error) {
             ++start_calls;
@@ -37,7 +50,7 @@ int main() {
             error = result_error;
             return fake_results;
         },
-        [&]() { return counters; },
+        [&]() { return events; },
         [&]() { return now; },
         std::chrono::milliseconds(5000));
 
@@ -57,11 +70,12 @@ int main() {
     assert(start_calls == 1);
 
     now += std::chrono::milliseconds(1200);
+    emit_started();
     auto still_scanning = lifecycle.poll();
     assert(still_scanning.state == WifiScanState::Scanning);
     assert(result_calls == 0);
 
-    ++counters.completed;
+    emit_completed();
     auto ready = lifecycle.poll();
     assert(ready.state == WifiScanState::Ready);
     assert(ready.records.size() == 1);
@@ -76,7 +90,8 @@ int main() {
     assert(second.scan_id == 2);
     assert(second.state == WifiScanState::Scanning);
     assert(start_calls == 2);
-    ++counters.failed;
+    emit_started();
+    emit_failed();
     auto failed_event = lifecycle.poll();
     assert(failed_event.state == WifiScanState::Failed);
     assert(failed_event.error == "scan_failed");
@@ -88,19 +103,34 @@ int main() {
     assert(timed_out.state == WifiScanState::Failed);
     assert(timed_out.error == "timeout");
 
-    start_ok = false;
-    start_error = "backend rejected scan";
     auto fourth = lifecycle.start();
     assert(fourth.scan_id == 4);
-    assert(fourth.state == WifiScanState::Failed);
-    assert(fourth.error == "backend rejected scan");
+    emit_completed();
+    auto stale_completion = lifecycle.poll();
+    assert(stale_completion.state == WifiScanState::Scanning);
+    assert(result_calls == 1);
+    emit_started();
+    auto after_new_started = lifecycle.poll();
+    assert(after_new_started.state == WifiScanState::Scanning);
+    emit_completed();
+    auto fourth_ready = lifecycle.poll();
+    assert(fourth_ready.state == WifiScanState::Ready);
+    assert(result_calls == 2);
+
+    start_ok = false;
+    start_error = "backend rejected scan";
+    auto fifth = lifecycle.start();
+    assert(fifth.scan_id == 5);
+    assert(fifth.state == WifiScanState::Failed);
+    assert(fifth.error == "backend rejected scan");
 
     start_ok = true;
     start_error.clear();
     result_error = "read failed";
-    auto fifth = lifecycle.start();
-    assert(fifth.scan_id == 5);
-    ++counters.completed;
+    auto sixth = lifecycle.start();
+    assert(sixth.scan_id == 6);
+    emit_started();
+    emit_completed();
     auto read_failed = lifecycle.poll();
     assert(read_failed.state == WifiScanState::Failed);
     assert(read_failed.error == "scan_results_failed: read failed");

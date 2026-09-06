@@ -18,9 +18,11 @@ enum class WifiScanState {
     Failed,
 };
 
-struct WifiScanEventCounters {
-    std::uint32_t completed = 0;
-    std::uint32_t failed = 0;
+struct WifiScanEventMarkers {
+    std::uint64_t sequence = 0;
+    std::uint64_t started_sequence = 0;
+    std::uint64_t completed_sequence = 0;
+    std::uint64_t failed_sequence = 0;
 };
 
 struct WifiScanStatus {
@@ -34,13 +36,13 @@ class WifiScanLifecycle {
 public:
     using StartFn = std::function<bool(std::string &)>;
     using ResultsFn = std::function<std::vector<WifiApRecord>(std::string &)>;
-    using CountersFn = std::function<WifiScanEventCounters()>;
+    using EventsFn = std::function<WifiScanEventMarkers()>;
     using Clock = std::chrono::steady_clock;
     using ClockFn = std::function<Clock::time_point()>;
 
     WifiScanLifecycle(StartFn start_fn,
                       ResultsFn results_fn,
-                      CountersFn counters_fn,
+                      EventsFn events_fn,
                       ClockFn clock_fn = {},
                       std::chrono::milliseconds timeout = std::chrono::milliseconds(5000));
 
@@ -50,12 +52,12 @@ public:
 
 private:
     Clock::time_point now() const;
-    WifiScanEventCounters counters() const;
+    WifiScanEventMarkers events() const;
     void fail(std::string error);
 
     StartFn start_fn_;
     ResultsFn results_fn_;
-    CountersFn counters_fn_;
+    EventsFn events_fn_;
     ClockFn clock_fn_;
     std::chrono::milliseconds timeout_;
 
@@ -63,7 +65,7 @@ private:
     WifiScanState state_ = WifiScanState::Idle;
     std::string error_;
     std::vector<WifiApRecord> records_;
-    WifiScanEventCounters baseline_;
+    WifiScanEventMarkers baseline_;
     Clock::time_point deadline_{};
 };
 
