@@ -19,6 +19,26 @@ jobs:
         with:
           ref: rc/nonblocking-wifi-scan
           fetch-depth: 0
+      - name: Narrow ambiguous CMake anchor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tools/ns_rc_001_apply.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''replace_once(
+              "CMakeLists.txt",
+              "    src/service/network_state_change_detector.cpp\\n",
+              "    src/service/network_state_change_detector.cpp\\n    src/service/wifi_scan_lifecycle.cpp\\n",
+          )'''
+          new = '''replace_once(
+              "CMakeLists.txt",
+              "add_executable(${NETWORK_SERVICE_TARGET}\\n    src/main.cpp\\n    src/service/network_daemon.cpp\\n    src/service/network_state_change_detector.cpp\\n",
+              "add_executable(${NETWORK_SERVICE_TARGET}\\n    src/main.cpp\\n    src/service/network_daemon.cpp\\n    src/service/network_state_change_detector.cpp\\n    src/service/wifi_scan_lifecycle.cpp\\n",
+          )'''
+          if text.count(old) != 1:
+              raise RuntimeError(f'expected one ambiguous CMake patch block, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Apply bounded NS-RC-001 patch
         run: python3 tools/ns_rc_001_apply.py
       - name: Verify diff shape
