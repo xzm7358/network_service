@@ -22,6 +22,7 @@ public:
         None = 0,
         EmitEventsSubscribed,
         SendAuthoritativeSnapshot,
+        DispatchBusinessRequest,
     };
 
     struct HandleResult {
@@ -29,6 +30,8 @@ public:
         bool close_after_send = false;
         ServerAction server_action = ServerAction::None;
         std::uint64_t action_request_id = 0;
+        std::string action_method;
+        std::string action_params_json = "{}";
     };
 
     Session(std::uint64_t generation, std::string session_id);
