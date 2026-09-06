@@ -26,6 +26,7 @@
 #include "ipc/network_ipc_v1_session.h"
 #include "network_service_protocol.h"
 #include "service/network_daemon.h"
+#include "service/network_state_change_detector.h"
 
 namespace network_service {
 
@@ -35,6 +36,7 @@ using Clock = std::chrono::steady_clock;
 
 static int g_wake_fd = -1;
 constexpr int kClientHandshakeIdleTimeoutMs = 1000;
+constexpr int kStateObservationIntervalMs = 250;
 constexpr size_t kMaxRequestBytes = 64 * 1024;
 constexpr std::size_t kMaxActiveClients = 8;
 constexpr std::size_t kReadBudgetPerTick = 16 * 1024;
@@ -252,6 +254,10 @@ bool NetworkIpcServer::listen(const std::string &socket_path) {
 
 void NetworkIpcServer::run() {
     std::vector<std::unique_ptr<ClientState>> clients;
+    NetworkStateChangeDetector state_detector;
+    (void)state_detector.observe(daemon_.snapshot());
+    Clock::time_point next_state_observation =
+        Clock::now() + std::chrono::milliseconds(kStateObservationIntervalMs);
 
     auto close_client = [](ClientState &client) {
         if (client.fd >= 0) {
@@ -296,6 +302,43 @@ void NetworkIpcServer::run() {
                   << " max_bytes=" << client.outbound.max_bytes() << std::endl;
         client.closed = true;
         return false;
+    };
+
+    auto broadcast_event = [&](const std::string &event_name,
+                               const std::string &payload_json) -> bool {
+        const std::vector<std::uint8_t> event =
+            event_sequencer_.encode_event(event_name, payload_json);
+        if (event.empty()) {
+            std::cerr << "network_service: IPC_V1_EVENT_ENCODE_FAILED event="
+                      << event_name << std::endl;
+            return false;
+        }
+
+        for (auto &entry : clients) {
+            ClientState &recipient = *entry;
+            if (recipient.closed || recipient.protocol != ClientProtocol::V1 ||
+                !recipient.session || !recipient.session->ready() ||
+                !recipient.session->events_subscribed()) {
+                continue;
+            }
+            std::vector<std::uint8_t> copy = event;
+            (void)enqueue_frame(recipient, std::move(copy));
+        }
+        return true;
+    };
+
+    auto observe_state_if_due = [&]() {
+        const Clock::time_point now = Clock::now();
+        if (now < next_state_observation) return;
+        next_state_observation =
+            now + std::chrono::milliseconds(kStateObservationIntervalMs);
+
+        const NetworkStateChangeSet changes = state_detector.observe(daemon_.snapshot());
+        if (!changes.any()) return;
+        if (!broadcast_event("network.state.changed", changes.payload_json())) {
+            std::cerr << "network_service: IPC_V1_STATE_EVENT_ALLOCATION_FAILED"
+                      << std::endl;
+        }
     };
 
     auto flush_client = [&](ClientState &client) {
@@ -361,9 +404,7 @@ void NetworkIpcServer::run() {
         }
 
         if (result.server_action == ipc_v1::Session::ServerAction::EmitEventsSubscribed) {
-            std::vector<std::uint8_t> event =
-                event_sequencer_.encode_event("network.events.subscribed", "{}");
-            if (event.empty() || !enqueue_frame(client, std::move(event))) {
+            if (!broadcast_event("network.events.subscribed", "{}")) {
                 client.closed = true;
                 return false;
             }
@@ -573,10 +614,12 @@ void NetworkIpcServer::run() {
                     std::chrono::milliseconds(ipc_v1::kDefaultWriteStallTimeoutMs));
             }
         }
+        include_deadline(next_state_observation);
         return timeout;
     };
 
     while (running_) {
+        observe_state_if_due();
         for (auto &entry : clients) {
             service_buffered_v1(*entry);
             if (!entry->outbound.empty()) flush_client(*entry);

@@ -1,6 +1,7 @@
 #ifndef NETWORK_SERVICE_DAEMON_H
 #define NETWORK_SERVICE_DAEMON_H
 
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -12,10 +13,13 @@ class WpaEventMonitor;
 
 class NetworkDaemon {
 public:
+    using SnapshotProvider = std::function<NetworkSnapshot()>;
+
     NetworkDaemon(std::string eth_iface,
                   std::string wifi_iface,
                   std::string config_dir,
-                  std::string event_dir);
+                  std::string event_dir,
+                  SnapshotProvider snapshot_provider = {});
     ~NetworkDaemon();
 
     NetworkSnapshot snapshot() const;
@@ -42,6 +46,7 @@ private:
     std::string eth_iface_;
     std::string wifi_iface_;
     std::string config_dir_;
+    SnapshotProvider snapshot_provider_;
     std::unique_ptr<WpaEventMonitor> wpa_monitor_;
 };
 
