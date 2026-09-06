@@ -10,6 +10,7 @@ set(NETWORK_SERVICE_TARGET network_service)
 add_executable(${NETWORK_SERVICE_TARGET}
     src/main.cpp
     src/service/network_daemon.cpp
+    src/service/network_state_change_detector.cpp
     src/ipc/network_ipc_server.cpp
     src/ipc/network_ipc_v1_codec.cpp
     src/ipc/network_ipc_v1_event.cpp
@@ -87,6 +88,16 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
     add_test(NAME network_ipc_v1_session COMMAND network_ipc_v1_session_test)
+
+    add_executable(network_state_change_detector_test
+        tests/network_state_change_detector_test.cpp
+        src/service/network_state_change_detector.cpp
+    )
+    target_include_directories(network_state_change_detector_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME network_state_change_detector COMMAND network_state_change_detector_test)
 endif()
 
 install(TARGETS ${NETWORK_SERVICE_TARGET}
