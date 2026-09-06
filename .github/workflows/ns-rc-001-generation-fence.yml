@@ -19,23 +19,6 @@ jobs:
         with:
           ref: rc/nonblocking-wifi-scan
           fetch-depth: 0
-      - name: Decouple protected EEP workflow update
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('tools/ns_rc_001_generation_fence.py')
-          text = path.read_text(encoding='utf-8')
-          block = '''replace_once(
-              ".github/workflows/eep-ci.yml",
-              ''' + "'''" + '''            src/service/network_state_change_detector.cpp \\\\\n            src/ipc/network_ipc_server.cpp \\\\\n''' + "'''" + ''',
-              ''' + "'''" + '''            src/service/network_state_change_detector.cpp \\\\\n            src/service/wifi_scan_lifecycle.cpp \\\\\n            src/ipc/network_ipc_server.cpp \\\\\n''' + "'''" + ''',
-          )
-
-'''
-          if text.count(block) != 1:
-              raise RuntimeError(f'expected one EEP workflow patch block, found {text.count(block)}')
-          path.write_text(text.replace(block, '', 1), encoding='utf-8')
-          PY
       - name: Apply generation fence fix
         run: python3 tools/ns_rc_001_generation_fence.py
       - name: Verify diff shape
