@@ -12,6 +12,7 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/service/network_daemon.cpp
     src/service/network_state_change_detector.cpp
     src/ipc/network_ipc_server.cpp
+    src/ipc/network_ipc_v1_business_dispatch.cpp
     src/ipc/network_ipc_v1_codec.cpp
     src/ipc/network_ipc_v1_event.cpp
     src/ipc/network_ipc_v1_outbound.cpp
@@ -104,6 +105,7 @@ if(BUILD_TESTING)
         src/service/network_daemon.cpp
         src/service/network_state_change_detector.cpp
         src/ipc/network_ipc_server.cpp
+        src/ipc/network_ipc_v1_business_dispatch.cpp
         src/ipc/network_ipc_v1_codec.cpp
         src/ipc/network_ipc_v1_event.cpp
         src/ipc/network_ipc_v1_outbound.cpp

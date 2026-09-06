@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "ipc/network_ipc_v1_business_dispatch.h"
 #include "ipc/network_ipc_v1_codec.h"
 #include "ipc/network_ipc_v1_outbound.h"
 #include "ipc/network_ipc_v1_rebase.h"
@@ -415,6 +416,17 @@ void NetworkIpcServer::run() {
                 generation_,
                 event_sequencer_.last_sequence(),
                 daemon_.snapshot_result_json());
+            if (response.empty() || !enqueue_frame(client, std::move(response))) {
+                client.closed = true;
+                return false;
+            }
+        } else if (result.server_action ==
+                   ipc_v1::Session::ServerAction::DispatchBusinessRequest) {
+            std::vector<std::uint8_t> response = ipc_v1::dispatch_business_request(
+                daemon_,
+                result.action_request_id,
+                result.action_method,
+                result.action_params_json);
             if (response.empty() || !enqueue_frame(client, std::move(response))) {
                 client.closed = true;
                 return false;

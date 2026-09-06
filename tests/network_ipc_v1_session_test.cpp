@@ -41,6 +41,7 @@ int main() {
         assert(ready.payload.find("\"request-response\"") != std::string::npos);
         assert(ready.payload.find("\"events\"") != std::string::npos);
         assert(ready.payload.find("\"snapshot-rebase\"") != std::string::npos);
+        assert(ready.payload.find("\"network-control\"") != std::string::npos);
         const Frame response = decode_response(session.handle_frame(make_frame(
             MessageType::Request,
             R"({"requestId":18446744073709551615,"method":"network.ping","params":{}})"))
@@ -85,6 +86,33 @@ int main() {
     }
 
     {
+        Session session(42, "session-42-business");
+        make_ready(session);
+        const auto request = session.handle_frame(make_frame(
+            MessageType::Request,
+            R"({"requestId":77,"method":"wifi.connect","params":{"ssid":"Lab WiFi","password":"secret123"}})"));
+        assert(request.response.empty());
+        assert(!request.close_after_send);
+        assert(request.server_action == Session::ServerAction::DispatchBusinessRequest);
+        assert(request.action_request_id == 77);
+        assert(request.action_method == "wifi.connect");
+        assert(request.action_params_json == R"({"ssid":"Lab WiFi","password":"secret123"})");
+        assert(session.ready());
+    }
+
+    {
+        Session session(42, "session-42-business-default-params");
+        make_ready(session);
+        const auto request = session.handle_frame(make_frame(
+            MessageType::Request,
+            R"({"requestId":78,"method":"wifi.scan"})"));
+        assert(request.server_action == Session::ServerAction::DispatchBusinessRequest);
+        assert(request.action_request_id == 78);
+        assert(request.action_method == "wifi.scan");
+        assert(request.action_params_json == "{}");
+    }
+
+    {
         Session session(42, "session-42-2");
         const auto result = session.handle_frame(make_frame(
             MessageType::Request,
@@ -105,16 +133,31 @@ int main() {
     }
 
     {
-        Session session(42, "session-42-4");
+        Session session(42, "session-42-invalid-params-array");
         make_ready(session);
         const Frame response = decode_response(session.handle_frame(make_frame(
             MessageType::Request,
-            R"({"requestId":77,"method":"does.not.exist","params":{}})"))
+            R"({"requestId":79,"method":"wifi.scan","params":[]})"))
                                                    .response);
         assert(response.header.type == MessageType::Response);
-        assert(response.payload.find("\"requestId\":77") != std::string::npos);
-        assert(response.payload.find("\"status\":404") != std::string::npos);
-        assert(response.payload.find("\"code\":\"METHOD_NOT_FOUND\"") != std::string::npos);
+        assert(response.payload.find("\"requestId\":79") != std::string::npos);
+        assert(response.payload.find("\"status\":400") != std::string::npos);
+        assert(response.payload.find("params must be a JSON object") != std::string::npos);
+        assert(session.ready());
+    }
+
+    {
+        Session session(42, "session-42-duplicate-params");
+        make_ready(session);
+        const Frame response = decode_response(session.handle_frame(make_frame(
+            MessageType::Request,
+            R"({"requestId":80,"method":"wifi.scan","params":{},"params":{}})"))
+                                                   .response);
+        assert(response.header.type == MessageType::Response);
+        assert(response.payload.find("\"requestId\":80") != std::string::npos);
+        assert(response.payload.find("\"status\":400") != std::string::npos);
+        assert(response.payload.find("params must appear at most once") != std::string::npos);
+        assert(session.ready());
     }
 
     {

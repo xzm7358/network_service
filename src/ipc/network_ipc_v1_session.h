@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ipc/network_ipc_v1_codec.h"
@@ -22,13 +23,20 @@ public:
         None = 0,
         EmitEventsSubscribed,
         SendAuthoritativeSnapshot,
+        DispatchBusinessRequest,
     };
 
     struct HandleResult {
+        HandleResult() = default;
+        HandleResult(std::vector<std::uint8_t> encoded_response, bool close)
+            : response(std::move(encoded_response)), close_after_send(close) {}
+
         std::vector<std::uint8_t> response;
         bool close_after_send = false;
         ServerAction server_action = ServerAction::None;
         std::uint64_t action_request_id = 0;
+        std::string action_method;
+        std::string action_params_json = "{}";
     };
 
     Session(std::uint64_t generation, std::string session_id);
