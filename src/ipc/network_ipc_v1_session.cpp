@@ -258,8 +258,10 @@ bool parse_hello_versions(const std::string &text,
 struct ParsedRequest {
     std::uint64_t request_id = 0;
     std::string method;
+    std::string params_json = "{}";
     bool have_request_id = false;
     bool have_method = false;
+    bool have_params = false;
 };
 
 enum class RequestParseError {
@@ -267,8 +269,10 @@ enum class RequestParseError {
     InvalidJson,
     DuplicateRequestId,
     DuplicateMethod,
+    DuplicateParams,
     InvalidRequestId,
     InvalidMethod,
+    InvalidParams,
     MissingRequestId,
     MissingMethod,
 };
@@ -313,6 +317,15 @@ RequestParseError parse_request(const std::string &text, ParsedRequest &out) {
             }
             out.method = std::move(method);
             out.have_method = true;
+        } else if (key == "params") {
+            if (out.have_params) return RequestParseError::DuplicateParams;
+            if (pos >= text.size() || text[pos] != '{') {
+                return RequestParseError::InvalidParams;
+            }
+            const std::size_t begin = pos;
+            if (!skip_value(text, pos, 1)) return RequestParseError::InvalidParams;
+            out.params_json = text.substr(begin, pos - begin);
+            out.have_params = true;
         } else if (!skip_value(text, pos, 1)) {
             return RequestParseError::InvalidJson;
         }
@@ -341,8 +354,10 @@ const char *request_error_message(RequestParseError error) {
     case RequestParseError::InvalidJson: return "REQUEST payload is invalid JSON";
     case RequestParseError::DuplicateRequestId: return "requestId must appear exactly once";
     case RequestParseError::DuplicateMethod: return "method must appear exactly once";
+    case RequestParseError::DuplicateParams: return "params must appear at most once";
     case RequestParseError::InvalidRequestId: return "requestId must be a non-zero uint64 integer";
     case RequestParseError::InvalidMethod: return "method must be a non-empty string";
+    case RequestParseError::InvalidParams: return "params must be a JSON object";
     case RequestParseError::MissingRequestId: return "requestId is required";
     case RequestParseError::MissingMethod: return "method is required";
     }
@@ -419,7 +434,7 @@ Session::HandleResult Session::ready_result() {
     std::ostringstream os;
     os << "{\"version\":1,\"service\":\"network_service\",\"sessionId\":\""
        << session_id_ << "\",\"generation\":" << generation_
-       << ",\"capabilities\":[\"request-response\",\"events\",\"snapshot-rebase\"]}";
+       << ",\"capabilities\":[\"request-response\",\"events\",\"snapshot-rebase\",\"network-control\"]}";
     return {encode_json(MessageType::Ready, os.str()), false};
 }
 
@@ -483,10 +498,12 @@ Session::HandleResult Session::handle_request(const std::string &payload) {
         return result;
     }
 
-    return response_error(request.request_id,
-                          404,
-                          "METHOD_NOT_FOUND",
-                          "unknown method");
+    HandleResult result;
+    result.server_action = ServerAction::DispatchBusinessRequest;
+    result.action_request_id = request.request_id;
+    result.action_method = std::move(request.method);
+    result.action_params_json = std::move(request.params_json);
+    return result;
 }
 
 } // namespace ipc_v1
