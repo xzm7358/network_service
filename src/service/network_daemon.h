@@ -10,6 +10,7 @@
 namespace network_service {
 
 class WpaEventMonitor;
+class WifiScanLifecycle;
 
 class NetworkDaemon {
 public:
@@ -34,6 +35,8 @@ public:
                                     const std::string &gateway,
                                     const std::string &dns) const;
     std::string wifi_scan_json() const;
+    std::string wifi_scan_start_json();
+    std::string wifi_scan_status_json();
     std::string wifi_set_enabled_json(bool enabled) const;
     std::string wifi_connect_json(const std::string &ssid, const std::string &password) const;
     std::string wifi_connect_saved_json(const std::string &ssid) const;
@@ -48,6 +51,7 @@ private:
     std::string config_dir_;
     SnapshotProvider snapshot_provider_;
     std::unique_ptr<WpaEventMonitor> wpa_monitor_;
+    std::unique_ptr<WifiScanLifecycle> wifi_scan_lifecycle_;
 };
 
 } // namespace network_service

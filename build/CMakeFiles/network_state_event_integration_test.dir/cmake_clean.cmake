@@ -1,0 +1,42 @@
+file(REMOVE_RECURSE
+  "CMakeFiles/network_state_event_integration_test.dir/link.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/config/ethernet_config.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/config/ethernet_config.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_server.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_server.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_v1_business_dispatch.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_v1_business_dispatch.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_v1_codec.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_v1_codec.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_v1_event.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_v1_event.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_v1_outbound.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_v1_outbound.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_v1_rebase.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_v1_rebase.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_v1_session.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/ipc/network_ipc_v1_session.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/platform/ethernet_apply.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/platform/ethernet_apply.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/platform/interface_snapshot.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/platform/interface_snapshot.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/platform/wifi_backend.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/platform/wifi_backend.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/platform/wpa_event_monitor.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/platform/wpa_event_monitor.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/service/network_daemon.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/service/network_daemon.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/service/network_state_change_detector.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/service/network_state_change_detector.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/src/service/wifi_scan_lifecycle.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/src/service/wifi_scan_lifecycle.cpp.o.d"
+  "CMakeFiles/network_state_event_integration_test.dir/tests/network_state_event_integration_test.cpp.o"
+  "CMakeFiles/network_state_event_integration_test.dir/tests/network_state_event_integration_test.cpp.o.d"
+  "network_state_event_integration_test"
+  "network_state_event_integration_test.pdb"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang CXX)
+  include(CMakeFiles/network_state_event_integration_test.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

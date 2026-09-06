@@ -119,6 +119,15 @@ WpaEventSnapshot WpaEventMonitor::snapshot() const {
 void WpaEventMonitor::update_event(const std::string &event) {
     std::lock_guard<std::mutex> guard(lock_);
     snapshot_.last_event = event;
+    if (event.find("CTRL-EVENT-SCAN-STARTED") != std::string::npos) {
+        snapshot_.scan_started_events++;
+    }
+    if (event.find("CTRL-EVENT-SCAN-RESULTS") != std::string::npos) {
+        snapshot_.scan_result_events++;
+    }
+    if (event.find("CTRL-EVENT-SCAN-FAILED") != std::string::npos) {
+        snapshot_.scan_failed_events++;
+    }
     if (const char *semantic = semantic_state_for_event(event)) {
         snapshot_.wifi_state = semantic;
     }
@@ -266,6 +275,9 @@ std::string wpa_event_snapshot_to_json(const WpaEventSnapshot &snapshot) {
        << "\"connect_events\":" << snapshot.connect_events << ","
        << "\"disconnect_events\":" << snapshot.disconnect_events << ","
        << "\"dhcp_requests\":" << snapshot.dhcp_requests << ","
+       << "\"scan_started_events\":" << snapshot.scan_started_events << ","
+       << "\"scan_result_events\":" << snapshot.scan_result_events << ","
+       << "\"scan_failed_events\":" << snapshot.scan_failed_events << ","
        << "\"wifi_state\":\"" << json_escape(snapshot.wifi_state) << "\","
        << "\"failure_reason\":\"" << json_escape(snapshot.failure_reason) << "\","
        << "\"last_event\":\"" << json_escape(snapshot.last_event) << "\","

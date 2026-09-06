@@ -32,6 +32,10 @@ EVENT fan-out remains reactor-owned:
 
 The 250 ms observation cadence and host-side client-count/deadline ceilings are implementation safety defaults, not real embedded-target timing or resource evidence.
 
+### Reactor-owned Wi-Fi scan lifecycle
+
+NS-RC-001 adds a process-local `WifiScanLifecycle` state machine owned by `NetworkDaemon`. Starting a scan issues only the bounded backend trigger and returns immediately. `wifi.scan.status` polls the state machine without waiting for physical completion. The existing `WpaEventMonitor` worker only contributes scan-completed/scan-failed counters; result collection occurs after those counters advance. No scan worker thread and no fixed sleep is added to the IPC reactor path.
+
 ## WPA event monitor
 
 `WpaEventMonitor` owns the existing worker `std::thread`, an atomic running flag, a mutex and a snapshot. The worker updates WPA event state; readers obtain a synchronized snapshot. NS-IPC-112 does not add or repurpose a WPA-monitor thread for IPC EVENT production.

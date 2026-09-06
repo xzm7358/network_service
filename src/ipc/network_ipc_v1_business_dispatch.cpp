@@ -413,6 +413,10 @@ std::vector<std::uint8_t> dispatch_business_request(
                                   "eth.set_static requires string ip/mask/gateway/dns");
         }
         daemon_json = daemon.eth_set_static_json(ip, mask, gateway, dns);
+    } else if (method == "wifi.scan.start") {
+        daemon_json = daemon.wifi_scan_start_json();
+    } else if (method == "wifi.scan.status") {
+        daemon_json = daemon.wifi_scan_status_json();
     } else if (method == "wifi.scan") {
         daemon_json = daemon.wifi_scan_json();
     } else if (method == "wifi.set_enabled") {

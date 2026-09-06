@@ -38,6 +38,8 @@ bool wifi_set_autoconnect(const std::string &iface,
                           const std::string &ssid,
                           bool enabled,
                           std::string &error);
+bool wifi_scan_start(const std::string &iface, std::string &error);
+std::vector<WifiApRecord> wifi_scan_results(const std::string &iface, std::string &error);
 std::vector<WifiApRecord> wifi_scan(const std::string &iface, std::string &error);
 std::vector<WifiSavedNetwork> wifi_list_saved(const std::string &iface, std::string &error);
 std::string wifi_scan_to_json(const std::vector<WifiApRecord> &records);

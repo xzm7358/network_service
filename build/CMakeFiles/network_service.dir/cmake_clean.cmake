@@ -1,0 +1,42 @@
+file(REMOVE_RECURSE
+  "/home/runner/work/network_service/network_service/app/smartcontrol/dnake/bin/network_service"
+  "/home/runner/work/network_service/network_service/app/smartcontrol/dnake/bin/network_service.pdb"
+  "CMakeFiles/network_service.dir/link.d"
+  "CMakeFiles/network_service.dir/src/config/ethernet_config.cpp.o"
+  "CMakeFiles/network_service.dir/src/config/ethernet_config.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_server.cpp.o"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_server.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_v1_business_dispatch.cpp.o"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_v1_business_dispatch.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_v1_codec.cpp.o"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_v1_codec.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_v1_event.cpp.o"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_v1_event.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_v1_outbound.cpp.o"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_v1_outbound.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_v1_rebase.cpp.o"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_v1_rebase.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_v1_session.cpp.o"
+  "CMakeFiles/network_service.dir/src/ipc/network_ipc_v1_session.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/main.cpp.o"
+  "CMakeFiles/network_service.dir/src/main.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/platform/ethernet_apply.cpp.o"
+  "CMakeFiles/network_service.dir/src/platform/ethernet_apply.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/platform/interface_snapshot.cpp.o"
+  "CMakeFiles/network_service.dir/src/platform/interface_snapshot.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/platform/wifi_backend.cpp.o"
+  "CMakeFiles/network_service.dir/src/platform/wifi_backend.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/platform/wpa_event_monitor.cpp.o"
+  "CMakeFiles/network_service.dir/src/platform/wpa_event_monitor.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/service/network_daemon.cpp.o"
+  "CMakeFiles/network_service.dir/src/service/network_daemon.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/service/network_state_change_detector.cpp.o"
+  "CMakeFiles/network_service.dir/src/service/network_state_change_detector.cpp.o.d"
+  "CMakeFiles/network_service.dir/src/service/wifi_scan_lifecycle.cpp.o"
+  "CMakeFiles/network_service.dir/src/service/wifi_scan_lifecycle.cpp.o.d"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang CXX)
+  include(CMakeFiles/network_service.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

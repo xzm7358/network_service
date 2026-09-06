@@ -11,6 +11,7 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/main.cpp
     src/service/network_daemon.cpp
     src/service/network_state_change_detector.cpp
+    src/service/wifi_scan_lifecycle.cpp
     src/ipc/network_ipc_server.cpp
     src/ipc/network_ipc_v1_business_dispatch.cpp
     src/ipc/network_ipc_v1_codec.cpp
@@ -90,6 +91,15 @@ if(BUILD_TESTING)
     )
     add_test(NAME network_ipc_v1_session COMMAND network_ipc_v1_session_test)
 
+    add_executable(wifi_scan_lifecycle_test
+        tests/wifi_scan_lifecycle_test.cpp
+        src/service/wifi_scan_lifecycle.cpp
+    )
+    target_include_directories(wifi_scan_lifecycle_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME wifi_scan_lifecycle COMMAND wifi_scan_lifecycle_test)
+
     add_executable(network_state_change_detector_test
         tests/network_state_change_detector_test.cpp
         src/service/network_state_change_detector.cpp
@@ -104,6 +114,7 @@ if(BUILD_TESTING)
         tests/network_state_event_integration_test.cpp
         src/service/network_daemon.cpp
         src/service/network_state_change_detector.cpp
+        src/service/wifi_scan_lifecycle.cpp
         src/ipc/network_ipc_server.cpp
         src/ipc/network_ipc_v1_business_dispatch.cpp
         src/ipc/network_ipc_v1_codec.cpp

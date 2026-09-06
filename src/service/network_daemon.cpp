@@ -13,6 +13,7 @@
 #include "platform/interface_snapshot.h"
 #include "platform/wifi_backend.h"
 #include "platform/wpa_event_monitor.h"
+#include "service/wifi_scan_lifecycle.h"
 
 namespace network_service {
 
@@ -79,6 +80,20 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
       snapshot_provider_(std::move(snapshot_provider)),
       wpa_monitor_(new WpaEventMonitor(wifi_iface_, std::move(event_dir))) {
     wpa_monitor_->start();
+    wifi_scan_lifecycle_.reset(new WifiScanLifecycle(
+        [this](std::string &error) {
+            return wifi_scan_start(wifi_iface_, error);
+        },
+        [this](std::string &error) {
+            return wifi_scan_results(wifi_iface_, error);
+        },
+        [this]() {
+            const WpaEventSnapshot events = wpa_monitor_->snapshot();
+            WifiScanEventCounters counters;
+            counters.completed = events.scan_result_events;
+            counters.failed = events.scan_failed_events;
+            return counters;
+        }));
 }
 
 NetworkDaemon::~NetworkDaemon() = default;
@@ -173,6 +188,35 @@ std::string NetworkDaemon::wifi_scan_json() const {
         return error_json(500, error);
     }
     return ok_json(wifi_scan_to_json(records));
+}
+
+static std::string wifi_scan_lifecycle_json(const WifiScanStatus &status) {
+    std::ostringstream os;
+    os << "{\"scanId\":" << status.scan_id
+       << ",\"state\":\"" << wifi_scan_state_name(status.state) << "\""
+       << ",\"error\":\"" << json_escape(status.error) << "\""
+       << ",\"results\":" << wifi_scan_to_json(status.records)
+       << "}";
+    return os.str();
+}
+
+std::string NetworkDaemon::wifi_scan_start_json() {
+    if (!wifi_scan_lifecycle_) {
+        return error_json(500, "wifi scan lifecycle unavailable");
+    }
+    WifiScanStatus status = wifi_scan_lifecycle_->start();
+    if (status.state == WifiScanState::Failed) {
+        return error_json(500, status.error);
+    }
+    return std::string("{\"status\":202,\"result\":") +
+           wifi_scan_lifecycle_json(status) + "}";
+}
+
+std::string NetworkDaemon::wifi_scan_status_json() {
+    if (!wifi_scan_lifecycle_) {
+        return error_json(500, "wifi scan lifecycle unavailable");
+    }
+    return ok_json(wifi_scan_lifecycle_json(wifi_scan_lifecycle_->poll()));
 }
 
 std::string NetworkDaemon::wifi_set_enabled_json(bool enabled) const {

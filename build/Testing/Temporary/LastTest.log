@@ -1,0 +1,129 @@
+Start testing: Sep 06 23:14 UTC
+----------------------------------------------------------
+1/8 Testing: network_ipc_v1_codec
+1/8 Test: network_ipc_v1_codec
+Command: "/home/runner/work/network_service/network_service/build/network_ipc_v1_codec_test"
+Directory: /home/runner/work/network_service/network_service/build
+"network_ipc_v1_codec" start time: Sep 06 23:14 UTC
+Output:
+----------------------------------------------------------
+network_ipc_v1_codec_test: PASS
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"network_ipc_v1_codec" end time: Sep 06 23:14 UTC
+"network_ipc_v1_codec" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/8 Testing: network_ipc_v1_event
+2/8 Test: network_ipc_v1_event
+Command: "/home/runner/work/network_service/network_service/build/network_ipc_v1_event_test"
+Directory: /home/runner/work/network_service/network_service/build
+"network_ipc_v1_event" start time: Sep 06 23:14 UTC
+Output:
+----------------------------------------------------------
+Network IPC v1 event sequencer: PASS
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"network_ipc_v1_event" end time: Sep 06 23:14 UTC
+"network_ipc_v1_event" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/8 Testing: network_ipc_v1_outbound
+3/8 Test: network_ipc_v1_outbound
+Command: "/home/runner/work/network_service/network_service/build/network_ipc_v1_outbound_test"
+Directory: /home/runner/work/network_service/network_service/build
+"network_ipc_v1_outbound" start time: Sep 06 23:14 UTC
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"network_ipc_v1_outbound" end time: Sep 06 23:14 UTC
+"network_ipc_v1_outbound" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/8 Testing: network_ipc_v1_rebase
+4/8 Test: network_ipc_v1_rebase
+Command: "/home/runner/work/network_service/network_service/build/network_ipc_v1_rebase_test"
+Directory: /home/runner/work/network_service/network_service/build
+"network_ipc_v1_rebase" start time: Sep 06 23:14 UTC
+Output:
+----------------------------------------------------------
+network_ipc_v1_rebase_test: PASS
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"network_ipc_v1_rebase" end time: Sep 06 23:14 UTC
+"network_ipc_v1_rebase" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/8 Testing: network_ipc_v1_session
+5/8 Test: network_ipc_v1_session
+Command: "/home/runner/work/network_service/network_service/build/network_ipc_v1_session_test"
+Directory: /home/runner/work/network_service/network_service/build
+"network_ipc_v1_session" start time: Sep 06 23:14 UTC
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"network_ipc_v1_session" end time: Sep 06 23:14 UTC
+"network_ipc_v1_session" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/8 Testing: wifi_scan_lifecycle
+6/8 Test: wifi_scan_lifecycle
+Command: "/home/runner/work/network_service/network_service/build/wifi_scan_lifecycle_test"
+Directory: /home/runner/work/network_service/network_service/build
+"wifi_scan_lifecycle" start time: Sep 06 23:14 UTC
+Output:
+----------------------------------------------------------
+PASS wifi_scan_lifecycle_test
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"wifi_scan_lifecycle" end time: Sep 06 23:14 UTC
+"wifi_scan_lifecycle" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/8 Testing: network_state_change_detector
+7/8 Test: network_state_change_detector
+Command: "/home/runner/work/network_service/network_service/build/network_state_change_detector_test"
+Directory: /home/runner/work/network_service/network_service/build
+"network_state_change_detector" start time: Sep 06 23:14 UTC
+Output:
+----------------------------------------------------------
+Network state change detector contract tests passed
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"network_state_change_detector" end time: Sep 06 23:14 UTC
+"network_state_change_detector" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/8 Testing: network_state_event_integration
+8/8 Test: network_state_event_integration
+Command: "/home/runner/work/network_service/network_service/build/network_state_event_integration_test"
+Directory: /home/runner/work/network_service/network_service/build
+"network_state_event_integration" start time: Sep 06 23:14 UTC
+Output:
+----------------------------------------------------------
+Network state EVENT integration contracts passed
+<end of output>
+Test time =   3.00 sec
+----------------------------------------------------------
+Test Passed.
+"network_state_event_integration" end time: Sep 06 23:14 UTC
+"network_state_event_integration" time elapsed: 00:00:03
+----------------------------------------------------------
+
+End testing: Sep 06 23:14 UTC
