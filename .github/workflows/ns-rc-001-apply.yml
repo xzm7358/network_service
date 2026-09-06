@@ -41,6 +41,39 @@ jobs:
           PY
       - name: Apply bounded NS-RC-001 patch
         run: python3 tools/ns_rc_001_apply.py
+      - name: Preserve generated C++ JSON escaping
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/service/network_daemon.cpp')
+          text = path.read_text(encoding='utf-8')
+          old = r'''static std::string wifi_scan_lifecycle_json(const WifiScanStatus &status) {
+              std::ostringstream os;
+              os << "{"scanId":" << status.scan_id
+                 << ","state":"" << wifi_scan_state_name(status.state) << """
+                 << ","error":"" << json_escape(status.error) << """
+                 << ","results":" << wifi_scan_to_json(status.records)
+                 << "}";
+              return os.str();
+          }'''
+          new = r'''static std::string wifi_scan_lifecycle_json(const WifiScanStatus &status) {
+              std::ostringstream os;
+              os << "{\"scanId\":" << status.scan_id
+                 << ",\"state\":\"" << wifi_scan_state_name(status.state) << "\""
+                 << ",\"error\":\"" << json_escape(status.error) << "\""
+                 << ",\"results\":" << wifi_scan_to_json(status.records)
+                 << "}";
+              return os.str();
+          }'''
+          if text.count(old) != 1:
+              raise RuntimeError(f'expected one malformed lifecycle JSON helper, found {text.count(old)}')
+          text = text.replace(old, new, 1)
+          old_start = '    return std::string("{"status":202,"result":") +\n'
+          new_start = '    return std::string("{\\\"status\\\":202,\\\"result\\\":") +\n'
+          if text.count(old_start) != 1:
+              raise RuntimeError(f'expected one malformed start envelope, found {text.count(old_start)}')
+          path.write_text(text.replace(old_start, new_start, 1), encoding='utf-8')
+          PY
       - name: Verify diff shape
         run: git diff --check
       - name: Configure host tests
