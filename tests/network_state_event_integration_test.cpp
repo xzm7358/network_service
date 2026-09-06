@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -125,6 +126,20 @@ struct Client {
     int fd = -1;
     std::uint64_t generation = 0;
 
+    Client() = default;
+    Client(const Client &) = delete;
+    Client &operator=(const Client &) = delete;
+    Client(Client &&other) noexcept : fd(other.fd), generation(other.generation) {
+        other.fd = -1;
+    }
+    Client &operator=(Client &&other) noexcept {
+        if (this == &other) return *this;
+        if (fd >= 0) ::close(fd);
+        fd = other.fd;
+        generation = other.generation;
+        other.fd = -1;
+        return *this;
+    }
     ~Client() {
         if (fd >= 0) ::close(fd);
     }
