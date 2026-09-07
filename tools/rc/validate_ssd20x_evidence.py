@@ -10,12 +10,17 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONTRACT = ROOT / "docs" / "contracts" / "ssd20x-rc-evidence-v1.json"
+DEFAULT_CONTRACT = ROOT / "docs" / "contracts" / "ssd20x-rc-evidence-v2.json"
 SHA40 = re.compile(r"^[0-9a-fA-F]{40}$")
 SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
+MAC = re.compile(r"^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
 
 
 class EvidenceError(RuntimeError):
+    pass
+
+
+class PolicyViolation(EvidenceError):
     pass
 
 
@@ -123,10 +128,67 @@ def load_thresholds(path: Path) -> dict[str, int]:
     return out
 
 
+def validate_mac_identity(
+    bundle: Path, contract: dict[str, Any], manifest: dict[str, str]
+) -> dict[str, Any] | None:
+    policy = contract.get("macIdentityPolicy")
+    if policy is None:
+        return None
+    if not isinstance(policy, dict) or policy.get("policy") != "immutable":
+        raise EvidenceError("macIdentityPolicy must be immutable")
+
+    rows = load_csv(bundle / "mac_samples.csv")
+    minimum = int(contract["minimumSamples"]["macIdentity"])
+    if len(rows) < minimum:
+        raise EvidenceError(f"mac_samples.csv: need at least {minimum} rows")
+
+    expected_iface = manifest["network_service_eth_iface"]
+    observed: list[str] = []
+    phases: set[str] = set()
+    for row in rows:
+        phase = row.get("phase", "")
+        if not phase:
+            raise EvidenceError("mac_samples.csv: phase is required")
+        phases.add(phase)
+        as_int(row.get("monotonic_ms", ""), f"mac {phase}:monotonic_ms", minimum=1)
+        if row.get("iface") != expected_iface:
+            raise EvidenceError(
+                f"mac {phase}: iface {row.get('iface')!r} != {expected_iface!r}"
+            )
+        mac = row.get("mac", "").lower()
+        if not MAC.fullmatch(mac):
+            raise EvidenceError(f"mac {phase}: invalid MAC address {mac!r}")
+        observed.append(mac)
+
+    for phase in policy.get("requiredPhases", []):
+        if phase not in phases:
+            raise EvidenceError(f"mac_samples.csv: missing required phase {phase}")
+
+    baseline = observed[0]
+    if policy.get("allSamplesMustEqualBaseline") is True:
+        changed = sorted({mac for mac in observed if mac != baseline})
+        if changed:
+            raise PolicyViolation(
+                "immutable Ethernet MAC policy violated: "
+                f"baseline={baseline}, observed_changes={changed}"
+            )
+
+    return {
+        "policy": "immutable",
+        "iface": expected_iface,
+        "baseline": baseline,
+        "samples": len(rows),
+        "stable": True,
+    }
+
+
 def validate_bundle(bundle: Path, contract_path: Path) -> dict[str, Any]:
     contract = load_json(contract_path)
-    if not isinstance(contract, dict) or contract.get("schemaVersion") != 1:
-        raise EvidenceError("evidence contract schemaVersion must be 1")
+    if not isinstance(contract, dict):
+        raise EvidenceError("evidence contract root must be an object")
+    schema_version = contract.get("schemaVersion")
+    if schema_version not in (1, 2):
+        raise EvidenceError("evidence contract schemaVersion must be 1 or 2")
 
     for rel in contract.get("requiredFiles", []):
         path = bundle / rel
@@ -140,8 +202,13 @@ def validate_bundle(bundle: Path, contract_path: Path) -> dict[str, Any]:
     require_keys(provenance, contract["requiredProvenanceKeys"], "provenance.env")
     require_keys(operator, contract["operatorAssertions"], "operator.env")
 
-    if as_int(manifest["schema_version"], "manifest.env:schema_version", minimum=1) != 1:
-        raise EvidenceError("manifest.env: unsupported schema_version")
+    observed_schema = as_int(
+        manifest["schema_version"], "manifest.env:schema_version", minimum=1
+    )
+    if observed_schema != schema_version:
+        raise EvidenceError(
+            f"manifest.env:schema_version={observed_schema} does not match contract={schema_version}"
+        )
     for key in ("network_service_revision", "smartcontrol_revision"):
         if not SHA40.fullmatch(provenance[key]):
             raise EvidenceError(f"provenance.env:{key} must be a 40-hex commit SHA")
@@ -239,9 +306,10 @@ def validate_bundle(bundle: Path, contract_path: Path) -> dict[str, Any]:
 
     smart_name = manifest.get("smartcontrol_process_name", "")
     smart_rows = [row for row in resources if smart_name and row.get("process") == smart_name]
+    mac_identity = validate_mac_identity(bundle, contract, manifest)
 
-    return {
-        "schemaVersion": 1,
+    result: dict[str, Any] = {
+        "schemaVersion": schema_version,
         "status": "EVIDENCE_COMPLETE_THRESHOLDS_UNFROZEN",
         "networkServiceRevision": provenance["network_service_revision"],
         "smartcontrolRevision": provenance["smartcontrol_revision"],
@@ -262,6 +330,9 @@ def validate_bundle(bundle: Path, contract_path: Path) -> dict[str, Any]:
             key: operator[key] for key in contract["operatorAssertions"]
         },
     }
+    if mac_identity is not None:
+        result["macIdentity"] = mac_identity
+    return result
 
 
 def apply_thresholds(result: dict[str, Any], thresholds: dict[str, int]) -> list[str]:
@@ -325,8 +396,12 @@ def main() -> int:
         result["status"] = "RC_PROVEN"
         emit(result, args.json_out)
         return 0
+    except PolicyViolation as exc:
+        result = {"schemaVersion": 2, "status": "RC_FAILED", "failures": [str(exc)]}
+        emit(result, args.json_out)
+        return 4
     except EvidenceError as exc:
-        result = {"schemaVersion": 1, "status": "EVIDENCE_INVALID", "error": str(exc)}
+        result = {"schemaVersion": 2, "status": "EVIDENCE_INVALID", "error": str(exc)}
         emit(result, args.json_out)
         return 2
 
