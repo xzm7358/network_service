@@ -101,8 +101,8 @@ if(BUILD_TESTING)
 
     add_executable(network_ipc_v1_session_test
         tests/network_ipc_v1_session_test.cpp
-        src/ipc/network_ipc_v1_session.cpp
         src/ipc/network_ipc_v1_codec.cpp
+        src/ipc/network_ipc_v1_session.cpp
     )
     target_include_directories(network_ipc_v1_session_test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -193,4 +193,6 @@ install(TARGETS ${NETWORK_SERVICE_TARGET}
 if(NETWORK_SERVICE_BUILD_RC_PROBE)
     install(TARGETS network_service_rc_probe
         RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
+    install(PROGRAMS tools/rc/ssd20x_collect.sh
+        DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
 endif()
