@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "bundleType": "network-service-ssd20x-rc-evidence",
+  "supersedes": "ssd20x-rc-evidence-v1.json",
+  "requiredFiles": [
+    "manifest.env",
+    "provenance.env",
+    "operator.env",
+    "hashes.sha256",
+    "ready.metrics",
+    "snapshot.metrics",
+    "post_restart_snapshot.metrics",
+    "scan_samples.csv",
+    "restart_samples.csv",
+    "resource_samples.csv",
+    "mac_samples.csv",
+    "raw/ready.json",
+    "raw/snapshot.json",
+    "raw/post_restart_snapshot.json"
+  ],
+  "requiredManifestKeys": [
+    "schema_version",
+    "collector_version",
+    "captured_at_utc",
+    "target_arch",
+    "target_uname",
+    "network_service_socket",
+    "network_service_eth_iface",
+    "network_service_binary",
+    "network_service_binary_sha256",
+    "network_service_process_name",
+    "network_service_pid",
+    "rc_probe_binary",
+    "rc_probe_sha256"
+  ],
+  "requiredProvenanceKeys": [
+    "network_service_revision",
+    "smartcontrol_revision",
+    "compiler_id",
+    "toolchain_id",
+    "sysroot_id",
+    "build_id"
+  ],
+  "requiredReadyCapabilities": [
+    "events",
+    "snapshot-rebase",
+    "network-control"
+  ],
+  "minimumSamples": {
+    "scan": 3,
+    "restart": 2,
+    "networkServiceResource": 5,
+    "macIdentity": 7
+  },
+  "macIdentityPolicy": {
+    "policy": "immutable",
+    "source": "/sys/class/net/<iface>/address",
+    "requiredPhases": [
+      "baseline",
+      "final"
+    ],
+    "allSamplesMustEqualBaseline": true
+  },
+  "operatorAssertions": [
+    "ui_responsive_during_scan",
+    "ui_recovers_after_restart"
+  ],
+  "allowedOperatorResults": [
+    "pass",
+    "fail",
+    "UNRECORDED"
+  ],
+  "requiredScanTerminalState": "ready",
+  "finalProofRequiresFrozenThresholds": true
+}
