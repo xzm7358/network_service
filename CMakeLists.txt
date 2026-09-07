@@ -137,6 +137,36 @@ if(BUILD_TESTING)
     )
     target_link_libraries(network_state_event_integration_test PRIVATE pthread)
     add_test(NAME network_state_event_integration COMMAND network_state_event_integration_test)
+
+    # Standalone real-producer fixture for cross-repository SmartControl E2E.
+    # It uses the production daemon/server implementation and only replaces the
+    # existing SnapshotProvider seam with a deterministic file-driven source.
+    add_executable(network_service_e2e_fixture
+        tests/network_service_e2e_fixture_main.cpp
+        src/service/network_daemon.cpp
+        src/service/network_state_change_detector.cpp
+        src/service/wifi_scan_lifecycle.cpp
+        src/ipc/network_ipc_server.cpp
+        src/ipc/network_ipc_v1_business_dispatch.cpp
+        src/ipc/network_ipc_v1_codec.cpp
+        src/ipc/network_ipc_v1_event.cpp
+        src/ipc/network_ipc_v1_outbound.cpp
+        src/ipc/network_ipc_v1_rebase.cpp
+        src/ipc/network_ipc_v1_session.cpp
+        src/platform/interface_snapshot.cpp
+        src/config/ethernet_config.cpp
+        src/platform/ethernet_apply.cpp
+        src/platform/wifi_backend.cpp
+        src/platform/wpa_event_monitor.cpp
+    )
+    target_include_directories(network_service_e2e_fixture PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_compile_definitions(network_service_e2e_fixture PRIVATE
+        NETWORK_SERVICE_VERSION=\"${PROJECT_VERSION}\"
+    )
+    target_link_libraries(network_service_e2e_fixture PRIVATE pthread)
 endif()
 
 install(TARGETS ${NETWORK_SERVICE_TARGET}
