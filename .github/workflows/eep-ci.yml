@@ -22,6 +22,10 @@ jobs:
         run: python3 tools/verify_ipc_source_contract.py
       - name: Verify architecture boundaries
         run: python3 tools/verify_architecture_boundaries.py
+      - name: Validate SSD20x RC evidence contract
+        run: python3 tests/ssd20x_rc_evidence_validator_test.py
+      - name: Validate BusyBox collector syntax
+        run: sh -n tools/rc/ssd20x_collect.sh
 
   strict-host-build:
     runs-on: ubuntu-latest
@@ -36,6 +40,11 @@ jobs:
         run: cmake --build build/strict --parallel 2
       - name: IPC v1 and state EVENT contracts
         run: ctest --test-dir build/strict --output-on-failure
+      - name: RC probe against real server fixture
+        run: >-
+          python3 tests/network_service_rc_probe_test.py
+          --fixture ./build/strict/network_service_e2e_fixture
+          --probe ./build/strict/network_service_rc_probe
       - name: HELLO READY session regression
         run: >-
           python3 tests/ipc_v1_session_test.py
@@ -86,6 +95,12 @@ jobs:
         run: >-
           env ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1
           ctest --test-dir build/sanitize --output-on-failure
+      - name: RC probe real-server regression under sanitizers
+        run: >-
+          env ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1
+          python3 tests/network_service_rc_probe_test.py
+          --fixture ./build/sanitize/network_service_e2e_fixture
+          --probe ./build/sanitize/network_service_rc_probe
       - name: HELLO READY session regression under sanitizers
         run: >-
           env ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1
@@ -167,6 +182,7 @@ jobs:
             src/config/ethernet_config.cpp \
             src/platform/ethernet_apply.cpp \
             src/platform/wifi_backend.cpp \
-            src/platform/wpa_event_monitor.cpp; do
+            src/platform/wpa_event_monitor.cpp \
+            tools/rc/network_service_rc_probe.cpp; do
             clang++ --analyze -std=c++17 -Iinclude -Isrc "$f"
           done
