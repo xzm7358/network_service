@@ -1,0 +1,67 @@
+name: NS-RC-002 bounded retirement
+
+on:
+  push:
+    branches:
+      - rc/retire-legacy-wifi-scan
+    paths:
+      - '.github/workflows/ns-rc-002-apply.yml'
+      - 'tools/ns_rc_002_apply.py'
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rc/retire-legacy-wifi-scan
+          fetch-depth: 0
+      - name: Apply v1 retirement patch
+        run: python3 tools/ns_rc_002_apply.py
+      - name: Verify diff shape
+        run: git diff --check
+      - name: Verify v1 retired and v0 preserved
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -n -E 'method == "wifi\.scan"' src/ipc/network_ipc_v1_business_dispatch.cpp; then
+            echo 'legacy wifi.scan remains reachable in v1 dispatch' >&2
+            exit 1
+          fi
+          grep -n -F 'if (method == "wifi.scan")' src/ipc/network_ipc_server.cpp
+          grep -n -F '"wifi.scan"' docs/contracts/network-ipc-source-v0.json
+      - name: Configure strict host regression
+        run: >-
+          cmake -S . -B build/ns-rc-002
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS='-Wall -Wextra -Wpedantic -Werror'
+      - name: Build strict host regression
+        run: cmake --build build/ns-rc-002 --parallel 2
+      - name: Run deterministic regressions
+        run: ctest --test-dir build/ns-rc-002 --output-on-failure
+      - name: Verify v1 business dispatch retirement
+        run: python3 tests/ipc_v1_business_dispatch_test.py --binary app/smartcontrol/dnake/bin/network_service
+      - name: Configure sanitizers
+        run: >-
+          cmake -S . -B build/ns-rc-002-sanitize
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS='-Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -g'
+          -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+      - name: Build sanitizers
+        run: cmake --build build/ns-rc-002-sanitize --parallel 2
+      - name: Run regressions under ASan/UBSan
+        run: >-
+          env ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1
+          ctest --test-dir build/ns-rc-002-sanitize --output-on-failure
+      - name: Commit product patch only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/ipc/network_ipc_v1_business_dispatch.cpp
+          git add tests/ipc_v1_business_dispatch_test.py
+          git add docs/contracts/WIFI_SCAN_LIFECYCLE_V1.md
+          git commit -m "NS-RC-002: retire legacy wifi.scan from IPC v1"
+          git push origin HEAD:rc/retire-legacy-wifi-scan
