@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(NETWORK_SERVICE_TARGET network_service)
+option(NETWORK_SERVICE_BUILD_RC_PROBE
+    "Build the target-side IPC v1 RC evidence probe"
+    OFF)
 
 add_executable(${NETWORK_SERVICE_TARGET}
     src/main.cpp
@@ -42,6 +45,21 @@ set_target_properties(${NETWORK_SERVICE_TARGET} PROPERTIES
 )
 
 include(CTest)
+
+# The RC probe is built automatically by host test configurations so its code
+# stays under Werror/sanitizer pressure. Target superbuilds can request it with
+# -DBUILD_TESTING=OFF -DNETWORK_SERVICE_BUILD_RC_PROBE=ON and deploy it beside
+# network_service without enabling the rest of the test suite.
+if(BUILD_TESTING OR NETWORK_SERVICE_BUILD_RC_PROBE)
+    add_executable(network_service_rc_probe
+        tools/rc/network_service_rc_probe.cpp
+        src/ipc/network_ipc_v1_codec.cpp
+    )
+    target_include_directories(network_service_rc_probe PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+endif()
+
 if(BUILD_TESTING)
     add_executable(network_ipc_v1_codec_test
         tests/network_ipc_v1_codec_test.cpp
@@ -83,8 +101,8 @@ if(BUILD_TESTING)
 
     add_executable(network_ipc_v1_session_test
         tests/network_ipc_v1_session_test.cpp
-        src/ipc/network_ipc_v1_session.cpp
         src/ipc/network_ipc_v1_codec.cpp
+        src/ipc/network_ipc_v1_session.cpp
     )
     target_include_directories(network_ipc_v1_session_test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -171,3 +189,10 @@ endif()
 
 install(TARGETS ${NETWORK_SERVICE_TARGET}
     RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
+
+if(NETWORK_SERVICE_BUILD_RC_PROBE)
+    install(TARGETS network_service_rc_probe
+        RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
+    install(PROGRAMS tools/rc/ssd20x_collect.sh
+        DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
+endif()

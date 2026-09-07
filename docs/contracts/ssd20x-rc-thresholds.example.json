@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "maxReadyLatencyMs": null,
+  "maxScanStartLatencyMs": null,
+  "maxScanCompletionMs": null,
+  "maxRestartToReadyMs": null,
+  "maxNetworkServiceRssKb": null,
+  "maxNetworkServiceThreads": null,
+  "maxNetworkServiceFd": null,
+  "note": "Example only. Null means UNFROZEN and is intentionally rejected by final RC validation. Replace every null with a reviewed positive integer before using --thresholds."
+}
