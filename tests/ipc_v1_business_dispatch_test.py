@@ -139,6 +139,19 @@ def test_scan_status_is_immediate_and_explicit(path: Path):
             raise AssertionError(f"idle scan results must be empty: {response}")
 
 
+def test_legacy_sync_scan_is_retired_from_v1(path: Path):
+    with connect_ready(path) as sock:
+        started = time.monotonic()
+        response = request(sock, 46, "wifi.scan", {})
+        elapsed = time.monotonic() - started
+        if elapsed > 0.5:
+            raise AssertionError(f"retired wifi.scan still blocked for {elapsed:.3f}s")
+        if response.get("status") != 404:
+            raise AssertionError(f"retired wifi.scan must be 404: {response}")
+        if (response.get("error") or {}).get("code") != "METHOD_NOT_FOUND":
+            raise AssertionError(f"retired wifi.scan error shape mismatch: {response}")
+
+
 def test_unknown_method_correlated_404(path: Path):
     with connect_ready(path) as sock:
         response = request(sock, 51, "does.not.exist", {})
@@ -161,6 +174,7 @@ def main():
         test_write_method_schema_rejected_without_session_teardown,
         test_boolean_schema_is_strict,
         test_scan_status_is_immediate_and_explicit,
+        test_legacy_sync_scan_is_retired_from_v1,
         test_unknown_method_correlated_404,
     ]
 

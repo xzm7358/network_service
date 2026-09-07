@@ -417,8 +417,6 @@ std::vector<std::uint8_t> dispatch_business_request(
         daemon_json = daemon.wifi_scan_start_json();
     } else if (method == "wifi.scan.status") {
         daemon_json = daemon.wifi_scan_status_json();
-    } else if (method == "wifi.scan") {
-        daemon_json = daemon.wifi_scan_json();
     } else if (method == "wifi.set_enabled") {
         bool enabled = false;
         if (!read_bool(params_json, "enabled", &enabled)) {

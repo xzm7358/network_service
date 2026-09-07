@@ -59,4 +59,6 @@ The current implementation timeout is 5000 ms. Timeout handling is bounded and e
 
 ## Compatibility boundary
 
-Legacy `wifi.scan` remains temporarily available for brownfield compatibility and retains its synchronous behavior. New/updated SmartControl code MUST migrate to `wifi.scan.start` + `wifi.scan.status`. Removal of legacy `wifi.scan` requires consumer migration and joint RC evidence.
+The synchronous `wifi.scan` method is retired from the IPC v1 business surface after SmartControl consumer migration. A v1 REQUEST for exact method `wifi.scan` MUST return correlated `404 METHOD_NOT_FOUND` and MUST NOT enter the physical scan path.
+
+The frozen brownfield v0 compatibility path is intentionally different: v0 `wifi.scan` remains supported through the v0 newline-delimited JSON dispatcher until a separate v0-removal change satisfies the migration and real-target evidence requirements in `NETWORK_IPC_CONTRACT_V1.md`. Therefore the shared `NetworkDaemon::wifi_scan_json()` and synchronous backend helper remain only as v0 compatibility implementation and are not reachable from IPC v1.
