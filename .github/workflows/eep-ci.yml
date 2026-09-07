@@ -22,6 +22,10 @@ jobs:
         run: python3 tools/verify_ipc_source_contract.py
       - name: Verify architecture boundaries
         run: python3 tools/verify_architecture_boundaries.py
+      - name: Verify immutable Ethernet MAC policy
+        run: python3 tools/verify_mac_identity_policy.py
+      - name: Regression-test immutable MAC source guard
+        run: python3 tests/mac_identity_policy_guard_test.py
       - name: Validate SSD20x RC evidence contract
         run: python3 tests/ssd20x_rc_evidence_validator_test.py
       - name: Validate BusyBox collector syntax

@@ -1,13 +1,14 @@
 #!/bin/sh
 set -eu
 
-SCHEMA_VERSION=1
+SCHEMA_VERSION=2
 PROBE=${NETWORK_SERVICE_RC_PROBE:-/dnake/bin/network_service_rc_probe}
 SOCKET=${NETWORK_SERVICE_SOCKET:-/tmp/smart_hmi_network.sock}
 SERVICE_CMD=${NETWORK_SERVICE_SERVICE_CMD:-/etc/init.d/S40network_service}
 NETWORK_BIN=${NETWORK_SERVICE_BIN:-/dnake/bin/network_service}
 NETWORK_PROC=${NETWORK_SERVICE_PROCESS_NAME:-network_service}
 SMARTCONTROL_PROC=${SMARTCONTROL_PROCESS_NAME:-desktop}
+ETH_IFACE=${NETWORK_SERVICE_ETH:-eth0}
 OUT=
 PROVENANCE=
 SCAN_SAMPLES=3
@@ -31,6 +32,7 @@ Options:
   --socket PATH             NetworkService AF_UNIX socket
   --service-cmd PATH        init script supporting restart
   --network-bin PATH        deployed NetworkService binary
+  --eth IFACE               immutable Ethernet identity interface (default: eth0)
   --scan-samples N          physical Wi-Fi scan cycles (default: 3)
   --restart-samples N       service restart cycles (default: 2)
   --steady-samples N        steady resource samples (default: 5)
@@ -59,6 +61,7 @@ while [ "$#" -gt 0 ]; do
         --socket) SOCKET=$2; shift 2 ;;
         --service-cmd) SERVICE_CMD=$2; shift 2 ;;
         --network-bin) NETWORK_BIN=$2; shift 2 ;;
+        --eth) ETH_IFACE=$2; shift 2 ;;
         --scan-samples) SCAN_SAMPLES=$2; shift 2 ;;
         --restart-samples) RESTART_SAMPLES=$2; shift 2 ;;
         --steady-samples) STEADY_SAMPLES=$2; shift 2 ;;
@@ -74,6 +77,10 @@ done
 [ -x "$PROBE" ] || { echo "RC probe is not executable: $PROBE" >&2; exit 2; }
 [ -x "$SERVICE_CMD" ] || { echo "service command is not executable: $SERVICE_CMD" >&2; exit 2; }
 [ -x "$NETWORK_BIN" ] || { echo "NetworkService binary is not executable: $NETWORK_BIN" >&2; exit 2; }
+[ -r "/sys/class/net/$ETH_IFACE/address" ] || {
+    echo "Ethernet MAC sysfs identity is unavailable: /sys/class/net/$ETH_IFACE/address" >&2
+    exit 2
+}
 positive_int "$SCAN_SAMPLES" || { echo "invalid --scan-samples" >&2; exit 2; }
 positive_int "$RESTART_SAMPLES" || { echo "invalid --restart-samples" >&2; exit 2; }
 positive_int "$STEADY_SAMPLES" || { echo "invalid --steady-samples" >&2; exit 2; }
@@ -127,6 +134,15 @@ resource_row() {
     echo "$phase,$now,$name,$pid,$rss,$hwm,$threads,$fd_count" >> "$csv"
 }
 
+mac_row() {
+    phase=$1
+    csv=$2
+    mac=$(tr 'A-F' 'a-f' < "/sys/class/net/$ETH_IFACE/address" | tr -d '\r\n ')
+    [ -n "$mac" ] || { echo "empty MAC identity for $ETH_IFACE" >&2; return 1; }
+    now=$($PROBE clock-ms)
+    echo "$phase,$now,$ETH_IFACE,$mac" >> "$csv"
+}
+
 single_line() {
     printf '%s' "$1" | tr '\r\n' '  '
 }
@@ -144,11 +160,12 @@ probe_sha=$(sha256_cmd "$PROBE" | awk '{print $1}')
 
 cat > "$OUT/manifest.env" <<EOF
 schema_version=$SCHEMA_VERSION
-collector_version=1
+collector_version=2
 captured_at_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 target_arch=$(uname -m)
 target_uname=$(single_line "$(uname -a)")
 network_service_socket=$SOCKET
+network_service_eth_iface=$ETH_IFACE
 network_service_binary=$NETWORK_BIN
 network_service_binary_sha256=$network_sha
 network_service_process_name=$NETWORK_PROC
@@ -178,8 +195,10 @@ $PROBE --socket "$SOCKET" --timeout-ms "$PROBE_TIMEOUT_MS" \
     --out "$OUT/raw/snapshot.json" snapshot > "$OUT/snapshot.metrics"
 
 echo 'phase,monotonic_ms,process,pid,rss_kb,hwm_kb,threads,fd_count' > "$OUT/resource_samples.csv"
+echo 'phase,monotonic_ms,iface,mac' > "$OUT/mac_samples.csv"
 resource_row baseline "$NETWORK_PROC" "$network_pid" "$OUT/resource_samples.csv"
 resource_row baseline "$SMARTCONTROL_PROC" "$smartcontrol_pid" "$OUT/resource_samples.csv"
+mac_row baseline "$OUT/mac_samples.csv"
 
 echo 'sample,scan_id,start_latency_ms,completion_ms,final_state' > "$OUT/scan_samples.csv"
 i=1
@@ -193,6 +212,7 @@ while [ "$i" -le "$SCAN_SAMPLES" ]; do
     smartcontrol_pid=$(pid_for "$SMARTCONTROL_PROC" || true)
     resource_row "scan_$i" "$NETWORK_PROC" "$network_pid" "$OUT/resource_samples.csv"
     resource_row "scan_$i" "$SMARTCONTROL_PROC" "$smartcontrol_pid" "$OUT/resource_samples.csv"
+    mac_row "scan_$i" "$OUT/mac_samples.csv"
     i=$((i + 1))
 done
 
@@ -214,11 +234,13 @@ while [ "$i" -le "$RESTART_SAMPLES" ]; do
     smartcontrol_pid=$(pid_for "$SMARTCONTROL_PROC" || true)
     resource_row "restart_$i" "$NETWORK_PROC" "$network_pid" "$OUT/resource_samples.csv"
     resource_row "restart_$i" "$SMARTCONTROL_PROC" "$smartcontrol_pid" "$OUT/resource_samples.csv"
+    mac_row "restart_$i" "$OUT/mac_samples.csv"
     i=$((i + 1))
 done
 
 $PROBE --socket "$SOCKET" --timeout-ms "$PROBE_TIMEOUT_MS" \
     --out "$OUT/raw/post_restart_snapshot.json" snapshot > "$OUT/post_restart_snapshot.metrics"
+mac_row final "$OUT/mac_samples.csv"
 
 i=1
 while [ "$i" -le "$STEADY_SAMPLES" ]; do
@@ -230,10 +252,17 @@ while [ "$i" -le "$STEADY_SAMPLES" ]; do
     i=$((i + 1))
 done
 
+mac_unique=$(awk -F, 'NR > 1 {print $4}' "$OUT/mac_samples.csv" | sort -u | wc -l | awk '{print $1}')
+if [ "$mac_unique" -ne 1 ]; then
+    echo "immutable Ethernet MAC policy violated; see $OUT/mac_samples.csv" >&2
+    exit 5
+fi
+
 cat > "$OUT/README.txt" <<'EOF'
-SSD20x RC raw evidence bundle.
+SSD20x RC raw evidence bundle (schema v2).
 Run the host validator from the matching NetworkService source tree:
   python3 tools/rc/validate_ssd20x_evidence.py <bundle> --structure-only
+Schema v2 enforces immutable Ethernet MAC identity across baseline, physical scans, NetworkService restarts, and final capture.
 For final RC proof, also pass a reviewed thresholds JSON file and ensure operator.env records PASS for both UI assertions.
 EOF
 

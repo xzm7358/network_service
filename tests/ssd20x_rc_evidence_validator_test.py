@@ -9,11 +9,28 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR = ROOT / "tools" / "rc" / "validate_ssd20x_evidence.py"
+V1_CONTRACT = ROOT / "docs" / "contracts" / "ssd20x-rc-evidence-v1.json"
 
 
 def write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def replace_env(path: Path, key: str, value: str) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    prefix = key + "="
+    replaced = False
+    out: list[str] = []
+    for line in lines:
+        if line.startswith(prefix):
+            out.append(prefix + value)
+            replaced = True
+        else:
+            out.append(line)
+    if not replaced:
+        raise RuntimeError(f"missing env key {key} in {path}")
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
 def make_bundle(root: Path) -> Path:
@@ -22,12 +39,13 @@ def make_bundle(root: Path) -> Path:
         bundle / "manifest.env",
         "\n".join(
             [
-                "schema_version=1",
-                "collector_version=1",
+                "schema_version=2",
+                "collector_version=2",
                 "captured_at_utc=2026-09-07T00:00:00Z",
                 "target_arch=armv7l",
                 "target_uname=Linux fixture 4.9 armv7l",
                 "network_service_socket=/tmp/smart_hmi_network.sock",
+                "network_service_eth_iface=eth0",
                 "network_service_binary=/dnake/bin/network_service",
                 "network_service_binary_sha256=" + "a" * 64,
                 "network_service_process_name=network_service",
@@ -124,6 +142,13 @@ def make_bundle(root: Path) -> Path:
             f"steady_{sample + 1},{1000 + sample},desktop,456,{20000 + sample},22000,9,30"
         )
     write(bundle / "resource_samples.csv", "\n".join(resources) + "\n")
+
+    mac = "02:11:22:33:44:55"
+    mac_rows = ["phase,monotonic_ms,iface,mac"]
+    phases = ["baseline", "scan_1", "scan_2", "scan_3", "restart_1", "restart_2", "final"]
+    for index, phase in enumerate(phases, 1):
+        mac_rows.append(f"{phase},{2000 + index},eth0,{mac}")
+    write(bundle / "mac_samples.csv", "\n".join(mac_rows) + "\n")
     return bundle
 
 
@@ -150,6 +175,8 @@ def main() -> int:
         result = run(bundle, "--structure-only")
         require(result.returncode == 0, f"structure-only failed: {result.stdout} {result.stderr}")
         require("EVIDENCE_COMPLETE_THRESHOLDS_UNFROZEN" in result.stdout, "wrong structure status")
+        require('"stable": true' in result.stdout, "stable MAC identity evidence missing")
+        require('"baseline": "02:11:22:33:44:55"' in result.stdout, "MAC baseline missing")
 
         result = run(bundle)
         require(result.returncode == 3, "validator did not fail closed without thresholds")
@@ -181,6 +208,19 @@ def main() -> int:
         require(result.returncode == 0, f"valid evidence did not prove RC: {result.stdout}")
         require('"status": "RC_PROVEN"' in result.stdout, "RC_PROVEN missing")
 
+        changed_mac = root / "changed-mac"
+        shutil.copytree(bundle, changed_mac)
+        mac_text = (changed_mac / "mac_samples.csv").read_text(encoding="utf-8")
+        mac_text = mac_text.replace(
+            "restart_1,2005,eth0,02:11:22:33:44:55",
+            "restart_1,2005,eth0,02:11:22:33:44:66",
+        )
+        (changed_mac / "mac_samples.csv").write_text(mac_text, encoding="utf-8")
+        result = run(changed_mac, "--thresholds", str(thresholds))
+        require(result.returncode == 4, "MAC identity change did not fail release proof")
+        require('"status": "RC_FAILED"' in result.stdout, "MAC policy did not produce RC_FAILED")
+        require("immutable Ethernet MAC policy violated" in result.stdout, "MAC policy diagnosis missing")
+
         strict_thresholds = root / "strict-thresholds.json"
         data = json.loads(thresholds.read_text(encoding="utf-8"))
         data["maxScanCompletionMs"] = 100
@@ -202,6 +242,13 @@ def main() -> int:
         (bad_sha / "provenance.env").write_text(provenance, encoding="utf-8")
         result = run(bad_sha, "--structure-only")
         require(result.returncode == 2, "invalid source revision did not fail")
+
+        v1 = root / "v1"
+        shutil.copytree(bundle, v1)
+        replace_env(v1 / "manifest.env", "schema_version", "1")
+        result = run(v1, "--contract", str(V1_CONTRACT), "--structure-only")
+        require(result.returncode == 0, f"v1 compatibility regressed: {result.stdout}")
+        require('"schemaVersion": 1' in result.stdout, "v1 schema result missing")
 
     print("ssd20x RC evidence validator regression: PASS")
     return 0
