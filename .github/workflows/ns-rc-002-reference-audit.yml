@@ -1,0 +1,27 @@
+name: NS-RC-002 reference audit
+
+on:
+  push:
+    branches:
+      - rc/retire-legacy-wifi-scan
+    paths:
+      - '.github/workflows/ns-rc-002-reference-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Legacy scan reference audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== literal wifi.scan ==='
+          grep -RIn --exclude-dir=.git --exclude='ns-rc-002-reference-audit.yml' 'wifi\.scan' . || true
+          echo '=== wifi_scan_json ==='
+          grep -RIn --exclude-dir=.git 'wifi_scan_json' . || true
+          echo '=== direct wifi_scan call/declaration ==='
+          grep -RIn --exclude-dir=.git -E 'wifi_scan[[:space:]]*\(' . || true
