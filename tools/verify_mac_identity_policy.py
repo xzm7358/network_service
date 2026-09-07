@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DIAG = "MAC_IDENTITY_POLICY_VIOLATION"
-SOURCE_ROOTS = (ROOT / "src", ROOT / "include", ROOT / "packaging")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp", ".sh"}
 
 PATTERNS = (
@@ -35,24 +35,25 @@ def strip_comments(text: str) -> str:
     return text
 
 
-def iter_sources() -> list[Path]:
+def iter_sources(root: Path) -> list[Path]:
     files: list[Path] = []
-    for root in SOURCE_ROOTS:
-        if not root.exists():
+    for rel in ("src", "include", "packaging"):
+        source_root = root / rel
+        if not source_root.exists():
             continue
-        for path in root.rglob("*"):
+        for path in source_root.rglob("*"):
             if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES:
                 files.append(path)
     return sorted(files)
 
 
-def main() -> int:
+def verify(root: Path) -> list[str]:
     violations: list[str] = []
-    for path in iter_sources():
+    for path in iter_sources(root):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
-            violations.append(f"cannot read {path.relative_to(ROOT)}: {exc}")
+            violations.append(f"cannot read {path.relative_to(root)}: {exc}")
             continue
         stripped = strip_comments(text)
         for label, pattern in PATTERNS:
@@ -60,9 +61,18 @@ def main() -> int:
                 line = stripped.count("\n", 0, match.start()) + 1
                 excerpt = " ".join(match.group(0).split())[:160]
                 violations.append(
-                    f"{path.relative_to(ROOT)}:{line}: {label}: {excerpt!r}"
+                    f"{path.relative_to(root)}:{line}: {label}: {excerpt!r}"
                 )
+    return violations
 
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, default=ROOT)
+    args = parser.parse_args()
+    root = args.root.resolve()
+
+    violations = verify(root)
     if violations:
         for violation in violations:
             print(f"{DIAG}: {violation}", file=sys.stderr)
