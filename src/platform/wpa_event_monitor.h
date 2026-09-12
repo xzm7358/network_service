@@ -8,10 +8,17 @@
 #include <string>
 #include <thread>
 
+#include "network_service_types.h"
+
 namespace network_service {
 
 struct WpaEventSnapshot {
     bool attached = false;
+
+    // L2 truth owned by the supplicant monitor.
+    WifiL2State l2_state = WifiL2State::Unknown;
+
+    // Legacy compatibility fields retained for wpa.events serialization.
     bool connected = false;
     bool disconnected = false;
     bool dhcp_requested = false;
