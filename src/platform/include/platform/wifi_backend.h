@@ -4,26 +4,9 @@
 #include <string>
 #include <vector>
 
+#include "network_service_contracts.h"
+
 namespace network_service {
-
-struct WifiApRecord {
-    std::string bssid;
-    int frequency = 0;
-    int signal_dbm = 0;
-    std::string flags;
-    std::string ssid;
-};
-
-struct WifiSavedNetwork {
-    int network_id = -1;
-    std::string ssid;
-    std::string bssid;
-    std::string flags;
-    bool is_current = false;
-    bool is_disabled = false;
-    bool is_temp_disabled = false;
-    bool autoconnect = true;
-};
 
 // Interface/supplicant mechanisms. Product profile-selection and persistence
 // policy belongs to Service, not this Platform adapter.
