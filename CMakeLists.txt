@@ -12,6 +12,7 @@ option(NETWORK_SERVICE_BUILD_RC_PROBE
 
 add_executable(${NETWORK_SERVICE_TARGET}
     src/main.cpp
+    src/service/network_control_plane.cpp
     src/service/network_daemon.cpp
     src/service/network_state_change_detector.cpp
     src/service/wifi_manager.cpp
@@ -23,9 +24,10 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/ipc/network_ipc_v1_outbound.cpp
     src/ipc/network_ipc_v1_rebase.cpp
     src/ipc/network_ipc_v1_session.cpp
+    src/platform/dhcp_lease_store.cpp
     src/platform/interface_snapshot.cpp
+    src/platform/network_configurator.cpp
     src/config/ethernet_config.cpp
-    src/platform/ethernet_apply.cpp
     src/platform/udhcpc_process.cpp
     src/platform/wifi_backend.cpp
     src/platform/wpa_ctrl_client.cpp
@@ -131,8 +133,30 @@ if(BUILD_TESTING)
     target_link_libraries(wifi_manager_test PRIVATE pthread)
     add_test(NAME wifi_manager COMMAND wifi_manager_test)
 
+    add_executable(network_control_plane_test
+        tests/network_control_plane_test.cpp
+        src/service/network_control_plane.cpp
+        src/platform/dhcp_lease_store.cpp
+    )
+    target_include_directories(network_control_plane_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(network_control_plane_test PRIVATE pthread)
+    add_test(NAME network_control_plane COMMAND network_control_plane_test)
+
+    add_executable(dhcp_lease_store_test
+        tests/dhcp_lease_store_test.cpp
+        src/platform/dhcp_lease_store.cpp
+    )
+    target_include_directories(dhcp_lease_store_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME dhcp_lease_store COMMAND dhcp_lease_store_test)
+
     add_executable(udhcpc_process_test
         tests/udhcpc_process_test.cpp
+        src/platform/dhcp_lease_store.cpp
         src/platform/udhcpc_process.cpp
     )
     target_include_directories(udhcpc_process_test PRIVATE
@@ -162,6 +186,7 @@ if(BUILD_TESTING)
 
     add_executable(network_state_event_integration_test
         tests/network_state_event_integration_test.cpp
+        src/service/network_control_plane.cpp
         src/service/network_daemon.cpp
         src/service/network_state_change_detector.cpp
         src/service/wifi_manager.cpp
@@ -173,9 +198,10 @@ if(BUILD_TESTING)
         src/ipc/network_ipc_v1_outbound.cpp
         src/ipc/network_ipc_v1_rebase.cpp
         src/ipc/network_ipc_v1_session.cpp
+        src/platform/dhcp_lease_store.cpp
         src/platform/interface_snapshot.cpp
+        src/platform/network_configurator.cpp
         src/config/ethernet_config.cpp
-        src/platform/ethernet_apply.cpp
         src/platform/udhcpc_process.cpp
         src/platform/wifi_backend.cpp
         src/platform/wpa_ctrl_client.cpp
@@ -196,6 +222,7 @@ if(BUILD_TESTING)
     # existing SnapshotProvider seam with a deterministic file-driven source.
     add_executable(network_service_e2e_fixture
         tests/network_service_e2e_fixture_main.cpp
+        src/service/network_control_plane.cpp
         src/service/network_daemon.cpp
         src/service/network_state_change_detector.cpp
         src/service/wifi_manager.cpp
@@ -207,9 +234,10 @@ if(BUILD_TESTING)
         src/ipc/network_ipc_v1_outbound.cpp
         src/ipc/network_ipc_v1_rebase.cpp
         src/ipc/network_ipc_v1_session.cpp
+        src/platform/dhcp_lease_store.cpp
         src/platform/interface_snapshot.cpp
+        src/platform/network_configurator.cpp
         src/config/ethernet_config.cpp
-        src/platform/ethernet_apply.cpp
         src/platform/udhcpc_process.cpp
         src/platform/wifi_backend.cpp
         src/platform/wpa_ctrl_client.cpp

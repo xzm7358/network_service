@@ -9,11 +9,13 @@
 #endif
 
 #include "config/ethernet_config.h"
-#include "platform/ethernet_apply.h"
+#include "platform/dhcp_lease_store.h"
 #include "platform/interface_snapshot.h"
+#include "platform/network_configurator.h"
 #include "platform/udhcpc_process.h"
 #include "platform/wifi_backend.h"
 #include "platform/wpa_event_monitor.h"
+#include "service/network_control_plane.h"
 #include "service/wifi_manager.h"
 #include "service/wifi_scan_lifecycle.h"
 
@@ -87,26 +89,76 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
     : eth_iface_(std::move(eth_iface)),
       wifi_iface_(std::move(wifi_iface)),
       config_dir_(std::move(config_dir)),
-      snapshot_provider_(std::move(snapshot_provider)),
-      wifi_manager_(new WifiManager(
-          [this](std::string &error) {
-              return wifi_start_dhcp(wifi_iface_, error);
-          },
-          [this]() {
-              UdhcpcProcess::stop(wifi_iface_);
-          })),
-      wpa_monitor_(new WpaEventMonitor(
-          wifi_iface_,
-          std::move(event_dir),
-          [this](bool connected) {
-              if (!wifi_manager_) return;
-              if (connected) {
-                  wifi_manager_->on_l2_connected();
-              } else {
-                  wifi_manager_->on_l2_disconnected();
-              }
-          })) {
+      snapshot_provider_(std::move(snapshot_provider)) {
+    NetworkControlPlaneOps ops;
+    ops.start_dhcp = [](const std::string &iface, std::string &error) {
+        return UdhcpcProcess::start(iface, error);
+    };
+    ops.stop_dhcp = [](const std::string &iface) {
+        UdhcpcProcess::stop(iface);
+    };
+    ops.read_lease = [](const std::string &iface,
+                        DhcpLeaseFact &fact,
+                        bool &exists,
+                        std::string &error) {
+        return DhcpLeaseStore::read(iface, fact, exists, error);
+    };
+    ops.clear_lease = [](const std::string &iface) {
+        DhcpLeaseStore::clear(iface);
+    };
+    ops.apply_ipv4 = [](const std::string &iface,
+                        const std::string &ip4,
+                        const std::string &netmask4,
+                        std::string &error) {
+        return NetworkConfigurator::apply_ipv4(iface, ip4, netmask4, error);
+    };
+    ops.clear_ipv4 = [](const std::string &iface, std::string &error) {
+        return NetworkConfigurator::clear_ipv4(iface, error);
+    };
+    ops.set_default_route = [](const std::string &iface,
+                               const std::string &gateway4,
+                               int metric,
+                               std::string &error) {
+        return NetworkConfigurator::set_default_route(iface, gateway4, metric, error);
+    };
+    ops.clear_default_route = [](const std::string &iface) {
+        NetworkConfigurator::clear_default_route(iface);
+    };
+    ops.set_dns = [](const std::string &dns4, std::string &error) {
+        return NetworkConfigurator::set_primary_dns(dns4, error);
+    };
+    ops.clear_dns = [](std::string &error) {
+        return NetworkConfigurator::clear_dns(error);
+    };
+    ops.snapshot = [this]() {
+        return snapshot();
+    };
+
+    control_plane_.reset(new NetworkControlPlane(eth_iface_, wifi_iface_, std::move(ops)));
+    wifi_manager_.reset(new WifiManager(
+        [this](std::string &error) {
+            if (!control_plane_) {
+                error = "network control plane unavailable";
+                return false;
+            }
+            return control_plane_->start_dhcp(wifi_iface_, error);
+        },
+        [this]() {
+            if (control_plane_) control_plane_->stop_dhcp(wifi_iface_);
+        }));
+    wpa_monitor_.reset(new WpaEventMonitor(
+        wifi_iface_,
+        std::move(event_dir),
+        [this](bool connected) {
+            if (!wifi_manager_) return;
+            if (connected) {
+                wifi_manager_->on_l2_connected();
+            } else {
+                wifi_manager_->on_l2_disconnected();
+            }
+        }));
     wpa_monitor_->start();
+
     wifi_scan_lifecycle_.reset(new WifiScanLifecycle(
         [this](std::string &error) {
             return wifi_scan_start(wifi_iface_, error);
@@ -126,6 +178,14 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
 }
 
 NetworkDaemon::~NetworkDaemon() = default;
+
+bool NetworkDaemon::reconcile(std::string &error) {
+    if (!control_plane_) {
+        error = "network control plane unavailable";
+        return false;
+    }
+    return control_plane_->reconcile(error);
+}
 
 NetworkSnapshot NetworkDaemon::snapshot() const {
     if (snapshot_provider_) return snapshot_provider_();
@@ -180,8 +240,9 @@ std::string NetworkDaemon::eth_set_dhcp_json() const {
         return error_json(500, "failed to save ethernet config");
     }
 
+    if (!control_plane_) return error_json(500, "network control plane unavailable");
     std::string error;
-    if (!apply_ethernet_dhcp(config, error)) {
+    if (!control_plane_->start_dhcp(eth_iface_, error)) {
         return error_json(500, error);
     }
     return ok_json(ethernet_config_to_json(config));
@@ -205,8 +266,14 @@ std::string NetworkDaemon::eth_set_static_json(const std::string &ip,
         return error_json(500, "failed to save ethernet config");
     }
 
+    if (!control_plane_) return error_json(500, "network control plane unavailable");
     std::string error;
-    if (!apply_ethernet_static(config, error)) {
+    if (!control_plane_->apply_ethernet_static(config.ip4,
+                                               config.netmask4,
+                                               config.gateway4,
+                                               config.dns4,
+                                               config.route_metric,
+                                               error)) {
         return error_json(500, error);
     }
     return ok_json(ethernet_config_to_json(config));
