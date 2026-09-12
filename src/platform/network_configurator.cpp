@@ -38,6 +38,57 @@ bool run_command(const std::string &cmd, std::string &error) {
     return false;
 }
 
+std::string hex_gateway_to_ipv4(const std::string &hex) {
+#ifdef __linux__
+    if (hex.size() < 8) return {};
+    unsigned long raw = 0;
+    if (std::sscanf(hex.c_str(), "%lx", &raw) != 1) return {};
+    in_addr addr{};
+    addr.s_addr = static_cast<in_addr_t>(raw);
+    char buffer[INET_ADDRSTRLEN] = {0};
+    if (!inet_ntop(AF_INET, &addr, buffer, sizeof(buffer))) return {};
+    return buffer;
+#else
+    (void)hex;
+    return {};
+#endif
+}
+
+bool exact_default_route_exists(const std::string &iface,
+                                const std::string &gateway4,
+                                int metric) {
+#ifdef __linux__
+    std::ifstream input("/proc/net/route");
+    if (!input) return false;
+    std::string line;
+    std::getline(input, line);
+    while (std::getline(input, line)) {
+        std::istringstream row(line);
+        std::string row_iface;
+        std::string destination;
+        std::string gateway;
+        std::string flags;
+        std::string refcnt;
+        std::string use;
+        std::string row_metric;
+        if (!(row >> row_iface >> destination >> gateway >> flags >> refcnt >> use >> row_metric)) {
+            continue;
+        }
+        if (row_iface != iface || destination != "00000000") continue;
+        if (hex_gateway_to_ipv4(gateway) != gateway4) continue;
+        char *end = nullptr;
+        const long parsed_metric = std::strtol(row_metric.c_str(), &end, 10);
+        if (end == row_metric.c_str() || *end != '\0') continue;
+        if (parsed_metric == metric) return true;
+    }
+#else
+    (void)iface;
+    (void)gateway4;
+    (void)metric;
+#endif
+    return false;
+}
+
 bool dns_file_owned_by_network_service() {
     std::ifstream input("/etc/resolv.conf");
     if (!input) return false;
@@ -83,17 +134,33 @@ bool NetworkConfigurator::set_default_route(const std::string &iface,
         return false;
     }
 
-    clear_default_route(iface);
+    if (exact_default_route_exists(iface, gateway4, metric)) return true;
 
+    // Do not clear other default routes on the interface. They may belong to a
+    // different network manager. Service owns only the exact identity it asks us
+    // to ensure and records that identity for later deletion.
     char cmd[256];
     std::snprintf(cmd, sizeof(cmd), "route add default gw %s dev %s metric %d",
                   gateway4.c_str(), iface.c_str(), metric);
     return run_command(cmd, error);
 }
 
-void NetworkConfigurator::clear_default_route(const std::string &iface) {
-    if (!is_safe_iface(iface)) return;
-    (void)system(("route del default dev " + iface + " 2>/dev/null").c_str());
+bool NetworkConfigurator::clear_default_route(const std::string &iface,
+                                              const std::string &gateway4,
+                                              int metric,
+                                              std::string &error) {
+    error.clear();
+    if (!is_safe_iface(iface) || !is_ipv4(gateway4) || metric < 0 || metric > 65535) {
+        error = "invalid default route identity";
+        return false;
+    }
+
+    if (!exact_default_route_exists(iface, gateway4, metric)) return true;
+
+    char cmd[256];
+    std::snprintf(cmd, sizeof(cmd), "route del default gw %s dev %s metric %d",
+                  gateway4.c_str(), iface.c_str(), metric);
+    return run_command(cmd, error);
 }
 
 bool NetworkConfigurator::set_primary_dns(const std::string &dns4, std::string &error) {
