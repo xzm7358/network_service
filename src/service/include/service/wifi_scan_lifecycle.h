@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "platform/wifi_backend.h"
+#include "network_service_contracts.h"
 
 namespace network_service {
 
