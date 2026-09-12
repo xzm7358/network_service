@@ -260,7 +260,6 @@ bool wifi_disconnect(const std::string &iface, std::string &error) {
         error = "invalid wifi iface";
         return false;
     }
-    UdhcpcProcess::stop(iface);
     std::string ignored;
     (void)wpa_ok(iface, "DISCONNECT", ignored);
     (void)system(("route del default dev " + iface + " 2>/dev/null").c_str());
