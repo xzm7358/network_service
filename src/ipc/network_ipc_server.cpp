@@ -334,6 +334,12 @@ void NetworkIpcServer::run() {
         next_state_observation =
             now + std::chrono::milliseconds(kStateObservationIntervalMs);
 
+        std::string reconcile_error;
+        if (!daemon_.reconcile(reconcile_error)) {
+            std::cerr << "network_service: NETWORK_RECONCILE_FAILED error="
+                      << reconcile_error << std::endl;
+        }
+
         const NetworkStateChangeSet changes = state_detector.observe(daemon_.snapshot());
         if (!changes.any()) return;
         if (!broadcast_event("network.state.changed", changes.payload_json())) {
