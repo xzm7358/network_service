@@ -5,8 +5,8 @@
 #include <mutex>
 #include <string>
 
+#include "network_service_contracts.h"
 #include "network_service_types.h"
-#include "platform/dhcp_lease_store.h"
 
 namespace network_service {
 
@@ -40,13 +40,8 @@ public:
                                int manual_metric,
                                std::string &error);
 
-    // Fast cadence: consume DHCP lease facts only. External network state is not
-    // sampled unless a lease transition requires policy recomputation.
     bool reconcile(std::string &error);
     bool reconcile(bool &changed, std::string &error);
-
-    // Event/fallback path: refresh policy that depends on externally-managed
-    // route/DNS facts without touching DHCP lifecycle.
     bool refresh_external_state(std::string &error);
 
     bool set_route_policy(RoutePolicy policy, std::string &error);
