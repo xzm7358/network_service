@@ -28,10 +28,17 @@ REPRESENTATION_FORBIDDEN = [
     r"\b[A-Za-z_][A-Za-z0-9_]*_to_json\s*\(",
     r"\bpayload_json\s*\(",
 ]
+WIFI_PLATFORM_POLICY_FORBIDDEN = [
+    r"\bwifi_connect\s*\(",
+    r"\bwifi_connect_saved\s*\(",
+    r"\bwifi_forget_saved\s*\(",
+    r"\bwifi_set_autoconnect\s*\(",
+]
 DIAG = "PRODUCT_ARCHITECTURE_MECHANISM_LEAK"
 DHCP_DIAG = "PRODUCT_DHCP_CALLBACK_POLICY_LEAK"
 TRUTH_DIAG = "PRODUCT_PLATFORM_TRUTH_DERIVATION_LEAK"
 REPRESENTATION_DIAG = "PRODUCT_REPRESENTATION_BOUNDARY_LEAK"
+WIFI_POLICY_DIAG = "PRODUCT_WIFI_PLATFORM_POLICY_LEAK"
 
 
 def scan_text(path: Path, text: str, patterns=MECHANISMS):
@@ -83,6 +90,17 @@ def scan(root=ROOT):
                     REPRESENTATION_FORBIDDEN,
                 ):
                     findings.append((REPRESENTATION_DIAG, *finding))
+
+    for name in ["wifi_backend.h", "wifi_backend.cpp"]:
+        path = root / "src/platform" / name
+        if not path.exists():
+            continue
+        for finding in scan_text(
+            path,
+            path.read_text(errors="replace"),
+            WIFI_PLATFORM_POLICY_FORBIDDEN,
+        ):
+            findings.append((WIFI_POLICY_DIAG, *finding))
     return findings
 
 
@@ -138,6 +156,26 @@ def self_test():
         Path("network_daemon.cpp"),
         "NetworkSnapshot snapshot() const;",
         REPRESENTATION_FORBIDDEN,
+    )
+    assert scan_text(
+        Path("wifi_backend.cpp"),
+        "bool wifi_connect(const std::string &iface);",
+        WIFI_PLATFORM_POLICY_FORBIDDEN,
+    )
+    assert scan_text(
+        Path("wifi_backend.cpp"),
+        "return wifi_set_autoconnect(iface, ssid, enabled, error);",
+        WIFI_PLATFORM_POLICY_FORBIDDEN,
+    )
+    assert not scan_text(
+        Path("wifi_backend.cpp"),
+        'return wpa_ok(iface, "DISABLE_NETWORK all", error);',
+        WIFI_PLATFORM_POLICY_FORBIDDEN,
+    )
+    assert not scan_text(
+        Path("wifi_backend.cpp"),
+        'return wpa_ok(iface, "SAVE_CONFIG", error);',
+        WIFI_PLATFORM_POLICY_FORBIDDEN,
     )
 
 
