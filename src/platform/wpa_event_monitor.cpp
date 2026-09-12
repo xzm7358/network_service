@@ -47,10 +47,6 @@ static std::string normalize_event(const std::string &event) {
 }
 
 static bool l2_state_for_event(const std::string &event, WifiL2State &state) {
-    if (event.find("CTRL-EVENT-SCAN-STARTED") != std::string::npos) {
-        state = WifiL2State::Scanning;
-        return true;
-    }
     if (event.find("Trying to associate") != std::string::npos) {
         state = WifiL2State::Associating;
         return true;
@@ -87,7 +83,6 @@ static const char *legacy_state_for_l2(WifiL2State state) {
     switch (state) {
     case WifiL2State::Disabled: return "disabled";
     case WifiL2State::Disconnected: return "disconnected";
-    case WifiL2State::Scanning: return "scanning";
     case WifiL2State::Associating: return "associating";
     case WifiL2State::Associated: return "associated";
     case WifiL2State::Handshake: return "handshake";
@@ -146,17 +141,24 @@ void WpaEventMonitor::update_event(const std::string &event) {
     ++snapshot_.event_sequence;
     if (snapshot_.event_sequence == 0) ++snapshot_.event_sequence;
     const uint64_t sequence = snapshot_.event_sequence;
+
     if (event.find("CTRL-EVENT-SCAN-STARTED") != std::string::npos) {
+        snapshot_.scan_active = true;
         snapshot_.scan_started_events++;
         snapshot_.last_scan_started_sequence = sequence;
+        if (!snapshot_.connected) snapshot_.wifi_state = "scanning";
     }
     if (event.find("CTRL-EVENT-SCAN-RESULTS") != std::string::npos) {
+        snapshot_.scan_active = false;
         snapshot_.scan_result_events++;
         snapshot_.last_scan_result_sequence = sequence;
+        snapshot_.wifi_state = legacy_state_for_l2(snapshot_.l2_state);
     }
     if (event.find("CTRL-EVENT-SCAN-FAILED") != std::string::npos) {
+        snapshot_.scan_active = false;
         snapshot_.scan_failed_events++;
         snapshot_.last_scan_failed_sequence = sequence;
+        snapshot_.wifi_state = legacy_state_for_l2(snapshot_.l2_state);
     }
 
     WifiL2State l2 = WifiL2State::Unknown;
