@@ -1,5 +1,7 @@
 #include "platform/udhcpc_process.h"
 
+#include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -88,11 +90,25 @@ bool pid_matches_udhcpc_iface(int pid, const std::string &iface) {
 #endif
 }
 
-bool ensure_event_script(std::string &error) {
+std::string next_generation() {
+    static std::atomic<unsigned long long> sequence{0};
+    const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+    std::ostringstream os;
+    os << static_cast<unsigned long>(getpid()) << '_'
+       << static_cast<unsigned long long>(ticks) << '_'
+       << sequence.fetch_add(1, std::memory_order_relaxed);
+    return os.str();
+}
+
+bool ensure_event_script(const std::string &iface,
+                         const std::string &generation,
+                         std::string &error) {
     static std::mutex lock;
     std::lock_guard<std::mutex> guard(lock);
 
-    const std::string path = UdhcpcProcess::event_script_path();
+    const std::string path = UdhcpcProcess::event_script_path(iface, generation);
+    const std::string active = DhcpLeaseStore::generation_path_for(iface);
+    const std::string lease = DhcpLeaseStore::path_for(iface, generation);
     const std::string tmp = path + "." + std::to_string(getpid()) + ".tmp";
     std::ofstream f(tmp, std::ios::out | std::ios::trunc);
     if (!f) {
@@ -101,17 +117,28 @@ bool ensure_event_script(std::string &error) {
     }
 
     f << "#!/bin/sh\n"
-      << "lease=\"/tmp/network_service_dhcp_${interface}.lease\"\n"
+      << "active='" << active << "'\n"
+      << "lease='" << lease << "'\n"
+      << "generation='" << generation << "'\n"
       << "tmp=\"${lease}.$$\"\n"
+      << "is_current() {\n"
+      << "  [ -r \"$active\" ] || return 1\n"
+      << "  IFS= read -r current < \"$active\" || return 1\n"
+      << "  [ \"$current\" = \"$generation\" ]\n"
+      << "}\n"
       << "write_fact() {\n"
+      << "  is_current || exit 0\n"
       << "  {\n"
+      << "    printf 'generation=%s\\n' \"$generation\"\n"
       << "    printf 'event=%s\\n' \"$1\"\n"
       << "    printf 'ip=%s\\n' \"${ip:-}\"\n"
       << "    printf 'subnet=%s\\n' \"${subnet:-}\"\n"
       << "    printf 'router=%s\\n' \"${router:-}\"\n"
       << "    printf 'dns=%s\\n' \"${dns:-}\"\n"
       << "  } > \"$tmp\" || exit 1\n"
+      << "  is_current || { rm -f \"$tmp\"; exit 0; }\n"
       << "  mv -f \"$tmp\" \"$lease\" || exit 1\n"
+      << "  is_current || rm -f \"$lease\"\n"
       << "}\n"
       << "case \"$1\" in\n"
       << "  deconfig) write_fact deconfig ;;\n"
@@ -138,12 +165,21 @@ std::string UdhcpcProcess::pidfile_for(const std::string &iface) {
     return "/tmp/smart_hmi_udhcpc_" + iface + ".pid";
 }
 
-std::string UdhcpcProcess::event_script_path() {
-    return "/tmp/network_service_udhcpc_event.script";
+std::string UdhcpcProcess::event_script_path(const std::string &iface,
+                                             const std::string &generation) {
+    return "/tmp/network_service_udhcpc_" + iface + "_" + generation + ".script";
 }
 
 void UdhcpcProcess::stop(const std::string &iface) {
     if (!is_safe_iface(iface)) return;
+
+    std::string generation;
+    bool generation_exists = false;
+    std::string ignored;
+    (void)DhcpLeaseStore::active_generation(iface,
+                                            generation,
+                                            generation_exists,
+                                            ignored);
 
     const std::string pidfile = pidfile_for(iface);
     std::ifstream f(pidfile);
@@ -154,6 +190,10 @@ void UdhcpcProcess::stop(const std::string &iface) {
         }
     }
     (void)unlink(pidfile.c_str());
+
+    if (generation_exists) {
+        (void)unlink(event_script_path(iface, generation).c_str());
+    }
     DhcpLeaseStore::clear(iface);
 }
 
@@ -163,15 +203,27 @@ bool UdhcpcProcess::start(const std::string &iface, std::string &error) {
         error = "invalid DHCP iface";
         return false;
     }
-    if (!ensure_event_script(error)) return false;
 
     stop(iface);
 
+    const std::string generation = next_generation();
+    if (!DhcpLeaseStore::activate_generation(iface, generation, error)) return false;
+    if (!ensure_event_script(iface, generation, error)) {
+        DhcpLeaseStore::clear(iface);
+        return false;
+    }
+
+    const std::string script_path = event_script_path(iface, generation);
     std::ostringstream os;
     os << "udhcpc -i " << iface
        << " -t 15 -n -p " << shell_quote(pidfile_for(iface))
-       << " -s " << shell_quote(event_script_path()) << " &";
-    return run_command(os.str(), error);
+       << " -s " << shell_quote(script_path) << " &";
+    if (!run_command(os.str(), error)) {
+        (void)unlink(script_path.c_str());
+        DhcpLeaseStore::clear(iface);
+        return false;
+    }
+    return true;
 }
 
 } // namespace network_service
