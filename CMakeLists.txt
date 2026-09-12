@@ -119,6 +119,16 @@ if(BUILD_TESTING)
     )
     add_test(NAME wifi_scan_lifecycle COMMAND wifi_scan_lifecycle_test)
 
+    add_executable(wpa_ctrl_client_test
+        tests/wpa_ctrl_client_test.cpp
+        src/platform/wpa_ctrl_client.cpp
+    )
+    target_include_directories(wpa_ctrl_client_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(wpa_ctrl_client_test PRIVATE pthread)
+    add_test(NAME wpa_ctrl_client COMMAND wpa_ctrl_client_test)
+
     add_executable(network_state_change_detector_test
         tests/network_state_change_detector_test.cpp
         src/service/network_state_change_detector.cpp
