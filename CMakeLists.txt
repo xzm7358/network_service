@@ -13,7 +13,9 @@ option(NETWORK_SERVICE_BUILD_RC_PROBE
 add_executable(${NETWORK_SERVICE_TARGET}
     src/main.cpp
     src/service/network_control_plane.cpp
+    src/service/network_control_plane_reconcile.cpp
     src/service/network_daemon.cpp
+    src/service/network_daemon_events.cpp
     src/service/network_state.cpp
     src/service/network_state_change_detector.cpp
     src/service/wifi_manager.cpp
@@ -208,7 +210,9 @@ if(BUILD_TESTING)
     add_executable(network_state_event_integration_test
         tests/network_state_event_integration_test.cpp
         src/service/network_control_plane.cpp
+        src/service/network_control_plane_reconcile.cpp
         src/service/network_daemon.cpp
+        src/service/network_daemon_events.cpp
         src/service/network_state.cpp
         src/service/network_state_change_detector.cpp
         src/service/wifi_manager.cpp
@@ -246,7 +250,9 @@ if(BUILD_TESTING)
     add_executable(network_service_e2e_fixture
         tests/network_service_e2e_fixture_main.cpp
         src/service/network_control_plane.cpp
+        src/service/network_control_plane_reconcile.cpp
         src/service/network_daemon.cpp
+        src/service/network_daemon_events.cpp
         src/service/network_state.cpp
         src/service/network_state_change_detector.cpp
         src/service/wifi_manager.cpp
