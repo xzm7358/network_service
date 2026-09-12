@@ -23,9 +23,15 @@ PLATFORM_TRUTH_FORBIDDEN = [
     r"\.online\s*=",
     r"\.network_ready\s*=",
 ]
+REPRESENTATION_FORBIDDEN = [
+    r"\b[A-Za-z_][A-Za-z0-9_]*_json\s*\(",
+    r"\b[A-Za-z_][A-Za-z0-9_]*_to_json\s*\(",
+    r"\bpayload_json\s*\(",
+]
 DIAG = "PRODUCT_ARCHITECTURE_MECHANISM_LEAK"
 DHCP_DIAG = "PRODUCT_DHCP_CALLBACK_POLICY_LEAK"
 TRUTH_DIAG = "PRODUCT_PLATFORM_TRUTH_DERIVATION_LEAK"
+REPRESENTATION_DIAG = "PRODUCT_REPRESENTATION_BOUNDARY_LEAK"
 
 
 def scan_text(path: Path, text: str, patterns=MECHANISMS):
@@ -65,6 +71,18 @@ def scan(root=ROOT):
             PLATFORM_TRUTH_FORBIDDEN,
         ):
             findings.append((TRUTH_DIAG, *finding))
+
+    for base in [root / "src/service", root / "src/platform", root / "src/config"]:
+        if not base.exists():
+            continue
+        for path in base.rglob("*"):
+            if path.suffix in {".cpp", ".cc", ".c", ".h", ".hpp"}:
+                for finding in scan_text(
+                    path,
+                    path.read_text(errors="replace"),
+                    REPRESENTATION_FORBIDDEN,
+                ):
+                    findings.append((REPRESENTATION_DIAG, *finding))
     return findings
 
 
@@ -100,6 +118,26 @@ def self_test():
         Path("interface_snapshot.cpp"),
         "snapshot.dns_available = !snapshot.dns4.empty();",
         PLATFORM_TRUTH_FORBIDDEN,
+    )
+    assert scan_text(
+        Path("network_daemon.cpp"),
+        "std::string snapshot_json() const;",
+        REPRESENTATION_FORBIDDEN,
+    )
+    assert scan_text(
+        Path("wifi_backend.cpp"),
+        "std::string wifi_scan_to_json(const Records &records);",
+        REPRESENTATION_FORBIDDEN,
+    )
+    assert scan_text(
+        Path("network_state.cpp"),
+        "return changes.payload_json();",
+        REPRESENTATION_FORBIDDEN,
+    )
+    assert not scan_text(
+        Path("network_daemon.cpp"),
+        "NetworkSnapshot snapshot() const;",
+        REPRESENTATION_FORBIDDEN,
     )
 
 
