@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <poll.h>
+#include <sstream>
 #include <utility>
 #include <unistd.h>
 
@@ -71,7 +72,49 @@ static const char *failure_reason_for_event(const std::string &event) {
     return "";
 }
 
+static WifiL2State l2_state_for_status(const std::string &value) {
+    if (value == "COMPLETED") return WifiL2State::Connected;
+    if (value == "ASSOCIATING") return WifiL2State::Associating;
+    if (value == "ASSOCIATED") return WifiL2State::Associated;
+    if (value == "4WAY_HANDSHAKE" || value == "GROUP_HANDSHAKE") {
+        return WifiL2State::Handshake;
+    }
+    if (value == "INTERFACE_DISABLED") return WifiL2State::Disabled;
+    if (value == "DISCONNECTED" || value == "INACTIVE" || value == "SCANNING") {
+        return WifiL2State::Disconnected;
+    }
+    return WifiL2State::Unknown;
+}
+
+static void bump_sequence(WpaEventFact &snapshot) {
+    ++snapshot.event_sequence;
+    if (snapshot.event_sequence == 0) ++snapshot.event_sequence;
+}
+
 } // namespace
+
+bool parse_wpa_status_reply(const std::string &reply, WpaStatusFact &fact) {
+    fact = WpaStatusFact{};
+    std::istringstream input(reply);
+    std::string line;
+    bool have_state = false;
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const std::size_t pos = line.find('=');
+        if (pos == std::string::npos) continue;
+        const std::string key = line.substr(0, pos);
+        const std::string value = line.substr(pos + 1);
+        if (key == "wpa_state") {
+            fact.l2_state = l2_state_for_status(value);
+            have_state = true;
+        } else if (key == "ssid") {
+            fact.ssid = value;
+        } else if (key == "bssid") {
+            fact.bssid = value;
+        }
+    }
+    return have_state;
+}
 
 WpaEventMonitor::WpaEventMonitor(std::string iface,
                                  std::string ctrl_dir,
@@ -99,11 +142,36 @@ WpaEventFact WpaEventMonitor::snapshot() const {
     return snapshot_;
 }
 
+void WpaEventMonitor::apply_status(const WpaStatusFact &status) {
+    std::lock_guard<std::mutex> guard(lock_);
+    snapshot_.attached = true;
+    snapshot_.l2_state = status.l2_state;
+    snapshot_.failure_reason.clear();
+    if (!status.ssid.empty()) snapshot_.last_ssid = status.ssid;
+    if (!status.bssid.empty()) snapshot_.last_bssid = status.bssid;
+    bump_sequence(snapshot_);
+}
+
+void WpaEventMonitor::mark_channel_unavailable() {
+    std::lock_guard<std::mutex> guard(lock_);
+    const bool changed = snapshot_.attached ||
+                         snapshot_.l2_state != WifiL2State::Unknown ||
+                         snapshot_.scan_active ||
+                         !snapshot_.failure_reason.empty();
+    snapshot_.attached = false;
+    // Losing the ctrl channel is not evidence of DISCONNECTED. Explicitly drop
+    // previously observed L2 truth to Unknown so stale Connected/Disconnected
+    // state is never treated as authoritative after a monitor failure.
+    snapshot_.l2_state = WifiL2State::Unknown;
+    snapshot_.scan_active = false;
+    snapshot_.failure_reason.clear();
+    if (changed) bump_sequence(snapshot_);
+}
+
 void WpaEventMonitor::update_event(const std::string &event) {
     std::lock_guard<std::mutex> guard(lock_);
     snapshot_.last_event = event;
-    ++snapshot_.event_sequence;
-    if (snapshot_.event_sequence == 0) ++snapshot_.event_sequence;
+    bump_sequence(snapshot_);
     const std::uint64_t sequence = snapshot_.event_sequence;
 
     if (event.find("CTRL-EVENT-SCAN-STARTED") != std::string::npos) {
@@ -146,17 +214,38 @@ void WpaEventMonitor::run() {
         WpaCtrlClient ctrl(ctrl_path);
         std::string error;
         if (!ctrl.open(error) || !ctrl.attach(error)) {
-            {
-                std::lock_guard<std::mutex> guard(lock_);
-                snapshot_.attached = false;
-            }
+            mark_channel_unavailable();
             usleep(1500 * 1000);
             continue;
         }
 
-        {
-            std::lock_guard<std::mutex> guard(lock_);
-            snapshot_.attached = true;
+        // Never issue STATUS on the attached event socket: unsolicited
+        // CTRL-EVENT frames may otherwise be consumed as the request reply. A
+        // short-lived independent ctrl client gives us an authoritative current
+        // state while the attached socket continues to queue transitions.
+        WpaStatusFact status;
+        std::string status_reply;
+        std::string status_error;
+        WpaCtrlClient status_ctrl(ctrl_path);
+        const bool status_ok = status_ctrl.request("STATUS", status_reply, status_error) &&
+                               parse_wpa_status_reply(status_reply, status);
+        status_ctrl.close();
+
+        if (status_ok) {
+            apply_status(status);
+            if (link_state_handler_ && status.l2_state != WifiL2State::Unknown) {
+                link_state_handler_(status.l2_state == WifiL2State::Connected);
+            }
+        } else {
+            // ATTACH succeeded, but no point-in-time status was available. Keep
+            // monitor attachment truth while refusing to reuse a stale L2 fact.
+            {
+                std::lock_guard<std::mutex> guard(lock_);
+                snapshot_.attached = true;
+                snapshot_.l2_state = WifiL2State::Unknown;
+                snapshot_.failure_reason.clear();
+                bump_sequence(snapshot_);
+            }
         }
 
         while (running_) {
@@ -185,10 +274,7 @@ void WpaEventMonitor::run() {
             }
         }
 
-        {
-            std::lock_guard<std::mutex> guard(lock_);
-            snapshot_.attached = false;
-        }
+        mark_channel_unavailable();
         ctrl.close();
         if (running_) usleep(1000 * 1000);
     }
