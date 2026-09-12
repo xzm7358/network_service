@@ -11,8 +11,10 @@
 #include "config/ethernet_config.h"
 #include "platform/ethernet_apply.h"
 #include "platform/interface_snapshot.h"
+#include "platform/udhcpc_process.h"
 #include "platform/wifi_backend.h"
 #include "platform/wpa_event_monitor.h"
+#include "service/wifi_manager.h"
 #include "service/wifi_scan_lifecycle.h"
 
 namespace network_service {
@@ -45,8 +47,16 @@ static std::string error_json(int status, const std::string &message) {
     return os.str();
 }
 
-static void overlay_wpa_with_live_snapshot(WpaEventSnapshot &events,
-                                           const NetworkSnapshot &live) {
+static void overlay_wpa_with_runtime_state(WpaEventSnapshot &events,
+                                           const NetworkSnapshot &live,
+                                           const WifiManagerState &manager) {
+    events.dhcp_requested = manager.dhcp_requested;
+    events.dhcp_requests = manager.dhcp_requests;
+    if (!manager.failure_reason.empty()) {
+        events.wifi_state = "failed";
+        events.failure_reason = manager.failure_reason;
+    }
+
     events.has_ip = live.wifi.has_ip;
     events.has_default_route = live.wifi.has_default_route;
     events.dns_available = live.dns_available;
@@ -78,7 +88,24 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
       wifi_iface_(std::move(wifi_iface)),
       config_dir_(std::move(config_dir)),
       snapshot_provider_(std::move(snapshot_provider)),
-      wpa_monitor_(new WpaEventMonitor(wifi_iface_, std::move(event_dir))) {
+      wifi_manager_(new WifiManager(
+          [this](std::string &error) {
+              return wifi_start_dhcp(wifi_iface_, error);
+          },
+          [this]() {
+              UdhcpcProcess::stop(wifi_iface_);
+          })),
+      wpa_monitor_(new WpaEventMonitor(
+          wifi_iface_,
+          std::move(event_dir),
+          [this](bool connected) {
+              if (!wifi_manager_) return;
+              if (connected) {
+                  wifi_manager_->on_l2_connected();
+              } else {
+                  wifi_manager_->on_l2_disconnected();
+              }
+          })) {
     wpa_monitor_->start();
     wifi_scan_lifecycle_.reset(new WifiScanLifecycle(
         [this](std::string &error) {
@@ -127,7 +154,9 @@ std::string NetworkDaemon::wpa_events_json() const {
     }
 
     WpaEventSnapshot events = wpa_monitor_->snapshot();
-    overlay_wpa_with_live_snapshot(events, snapshot());
+    WifiManagerState manager;
+    if (wifi_manager_) manager = wifi_manager_->state();
+    overlay_wpa_with_runtime_state(events, snapshot(), manager);
     return ok_json(wpa_event_snapshot_to_json(events));
 }
 
@@ -222,6 +251,9 @@ std::string NetworkDaemon::wifi_scan_status_json() {
 }
 
 std::string NetworkDaemon::wifi_set_enabled_json(bool enabled) const {
+    if (!enabled && wifi_manager_) {
+        wifi_manager_->stop_dhcp();
+    }
     std::string error;
     if (!wifi_set_enabled(wifi_iface_, enabled, error)) {
         return error_json(500, error);
@@ -272,6 +304,9 @@ std::string NetworkDaemon::wifi_set_autoconnect_json(const std::string &ssid, bo
 }
 
 std::string NetworkDaemon::wifi_disconnect_json() const {
+    if (wifi_manager_) {
+        wifi_manager_->stop_dhcp();
+    }
     std::string error;
     if (!wifi_disconnect(wifi_iface_, error)) {
         return error_json(500, error);
