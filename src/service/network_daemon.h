@@ -2,6 +2,7 @@
 #define NETWORK_SERVICE_DAEMON_H
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -73,7 +74,7 @@ private:
     std::unique_ptr<WpaEventMonitor> wpa_monitor_;
     std::unique_ptr<WifiScanLifecycle> wifi_scan_lifecycle_;
     std::unique_ptr<NetlinkMonitor> netlink_monitor_;
-    std::atomic<bool> runtime_state_dirty_{false};
+    std::atomic<std::uint64_t> last_wpa_event_sequence_{0};
 };
 
 } // namespace network_service
