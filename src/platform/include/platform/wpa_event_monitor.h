@@ -12,6 +12,15 @@
 
 namespace network_service {
 
+// Mechanism-level point-in-time fact returned by wpa_supplicant STATUS.
+struct WpaStatusFact {
+    WifiL2State l2_state = WifiL2State::Unknown;
+    std::string ssid;
+    std::string bssid;
+};
+
+bool parse_wpa_status_reply(const std::string &reply, WpaStatusFact &fact);
+
 // Platform-owned supplicant facts only. IP/DHCP/route/DNS and legacy IPC view
 // fields belong to Service projection, not to the monitor.
 struct WpaEventFact {
@@ -52,6 +61,8 @@ public:
 private:
     void run();
     void update_event(const std::string &event);
+    void apply_status(const WpaStatusFact &status);
+    void mark_channel_unavailable();
 
     std::string iface_;
     std::string ctrl_dir_;
