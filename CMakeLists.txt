@@ -20,7 +20,7 @@ target_compile_definitions(network_service_build_config INTERFACE
 )
 
 # Platform Mechanism: Linux/daemon/persistence mechanics only. Platform can see
-# public contracts plus Platform/Config headers, but not Service or IPC headers.
+# neutral contracts plus Platform/Config headers, but not Service or IPC headers.
 add_library(network_service_platform STATIC
     src/platform/dhcp_lease_store.cpp
     src/platform/interface_snapshot.cpp
@@ -44,8 +44,9 @@ target_link_libraries(network_service_platform
 )
 add_library(NetworkService::Platform ALIAS network_service_platform)
 
-# Service / Policy: may depend on Platform. Its compile search path gains Service
-# headers here and Platform/Config headers only through NetworkService::Platform.
+# Service / Policy owns cross-boundary contracts through include/. Platform is an
+# implementation dependency only: its headers/libraries are available while
+# compiling Service, but are not exported to Service consumers such as IPC.
 add_library(network_service_service STATIC
     src/service/network_control_plane.cpp
     src/service/network_control_plane_reconcile.cpp
@@ -64,12 +65,13 @@ target_include_directories(network_service_service
 target_link_libraries(network_service_service
     PUBLIC
         network_service_build_config
+    PRIVATE
         NetworkService::Platform
 )
 add_library(NetworkService::Service ALIAS network_service_service)
 
-# IPC: transport/session/codec/business-dispatch/representation boundary. IPC sees
-# its own headers plus Service/Platform headers only through the legal link graph.
+# IPC sees only public contracts plus Service/IPC headers. Platform/Config headers
+# are no longer transitively visible through NetworkService::Service.
 add_library(network_service_ipc STATIC
     src/ipc/network_ipc_server.cpp
     src/ipc/network_ipc_representation.cpp
