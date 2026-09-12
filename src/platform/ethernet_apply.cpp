@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "platform/udhcpc_process.h"
+
 namespace network_service {
 
 namespace {
@@ -43,26 +45,8 @@ static bool run_command(const std::string &cmd, std::string &error) {
     return true;
 }
 
-static std::string dhcp_pidfile(const std::string &iface) {
-    return "/tmp/smart_hmi_udhcpc_" + iface + ".pid";
-}
-
 static std::string dhcp_script_path() {
     return "/tmp/smart_hmi_udhcpc_network_service.script";
-}
-
-static void stop_dhcp_for_iface(const std::string &iface) {
-    std::ifstream f(dhcp_pidfile(iface));
-    int pid = -1;
-    if (f >> pid) {
-        if (pid > 1) {
-            char cmd[128];
-            snprintf(cmd, sizeof(cmd), "kill %d 2>/dev/null", pid);
-            (void)system(cmd);
-        }
-    }
-    std::string rm = "rm -f " + dhcp_pidfile(iface);
-    (void)system(rm.c_str());
 }
 
 static bool ensure_dhcp_script(std::string &error) {
@@ -119,7 +103,7 @@ bool apply_ethernet_static(const EthernetConfig &config, std::string &error) {
         return false;
     }
 
-    stop_dhcp_for_iface(config.iface);
+    UdhcpcProcess::stop(config.iface);
 
     char cmd[256];
     snprintf(cmd, sizeof(cmd), "ifconfig %s %s netmask %s up",
@@ -147,14 +131,7 @@ bool apply_ethernet_static(const EthernetConfig &config, std::string &error) {
 bool apply_ethernet_dhcp(const EthernetConfig &config, std::string &error) {
     if (!validate_config_common(config, error)) return false;
     if (!ensure_dhcp_script(error)) return false;
-
-    stop_dhcp_for_iface(config.iface);
-
-    char cmd[384];
-    snprintf(cmd, sizeof(cmd),
-             "udhcpc -i %s -t 15 -n -p %s -s %s &",
-             config.iface.c_str(), dhcp_pidfile(config.iface).c_str(), dhcp_script_path().c_str());
-    return run_command(cmd, error);
+    return UdhcpcProcess::start(config.iface, dhcp_script_path(), error);
 }
 
 } // namespace network_service
