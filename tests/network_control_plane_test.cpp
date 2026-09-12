@@ -233,5 +233,31 @@ int main() {
     ok = expect(!recovery.dns_writes.empty() && recovery.dns_writes.back() == "8.8.8.8",
                 "Wi-Fi DNS must be restored after external Ethernet disappears") && ok;
 
+    // Brownfield adoption must be non-mutating itself. Once imported, the normal
+    // reconciliation path consumes the already-existing lease and converges the
+    // owned IPv4/route/DNS state without starting a second DHCP lifecycle.
+    FakePlatform adoption;
+    adoption.leases["wlan0"] = lease("wlan0", "10.0.0.60", "10.0.0.1", "9.9.9.9");
+    NetworkControlPlane adoption_plane("eth0", "wlan0", adoption.ops());
+    adoption.reset_observations();
+    ok = expect(adoption_plane.adopt_dhcp("wlan0", error),
+                "brownfield DHCP adoption failed") && ok;
+    ok = expect(adoption.ip_applies.empty() && adoption.routes.empty() &&
+                adoption.dns_writes.empty(),
+                "adoption must not mutate network state before reconcile") && ok;
+    bool adoption_changed = false;
+    ok = expect(adoption_plane.reconcile(adoption_changed, error),
+                "adopted DHCP reconcile failed") && ok;
+    ok = expect(adoption_changed,
+                "existing lease was not imported as a reconciliation change") && ok;
+    ok = expect(!adoption.ip_applies.empty() &&
+                adoption.ip_applies.back() == "wlan0=10.0.0.60",
+                "adopted lease did not converge IPv4") && ok;
+    ok = expect(!adoption.routes.empty() &&
+                std::get<0>(adoption.routes.back()) == "wlan0",
+                "adopted lease did not converge default route") && ok;
+    ok = expect(!adoption.dns_writes.empty() && adoption.dns_writes.back() == "9.9.9.9",
+                "adopted lease did not converge DNS") && ok;
+
     return ok ? 0 : 1;
 }
