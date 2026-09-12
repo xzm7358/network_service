@@ -9,6 +9,7 @@
 
 namespace network_service {
 
+class NetlinkMonitor;
 class NetworkControlPlane;
 class WifiManager;
 class WpaEventMonitor;
@@ -25,7 +26,17 @@ public:
                   SnapshotProvider snapshot_provider = {});
     ~NetworkDaemon();
 
+    // Fast DHCP lease-fact reconciliation. Does not perform periodic full-state
+    // observation when lease facts are unchanged.
     bool reconcile(std::string &error);
+
+    // Refresh policy that depends on externally-managed route/DNS state.
+    bool refresh_external_state(std::string &error);
+
+    // Service facade for the reactor. IPC does not depend on Netlink types.
+    int network_event_fd() const;
+    bool consume_network_events(bool &changed, std::string &error);
+
     NetworkSnapshot snapshot() const;
     std::string snapshot_result_json() const;
     std::string snapshot_json() const;
@@ -57,6 +68,7 @@ private:
     std::unique_ptr<WifiManager> wifi_manager_;
     std::unique_ptr<WpaEventMonitor> wpa_monitor_;
     std::unique_ptr<WifiScanLifecycle> wifi_scan_lifecycle_;
+    std::unique_ptr<NetlinkMonitor> netlink_monitor_;
 };
 
 } // namespace network_service
