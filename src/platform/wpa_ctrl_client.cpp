@@ -2,12 +2,14 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <poll.h>
 #include <sstream>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <utility>
 
 namespace network_service {
 namespace {
