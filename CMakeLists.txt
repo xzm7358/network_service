@@ -215,6 +215,12 @@ if(BUILD_TESTING)
     target_link_libraries(wpa_ctrl_client_test PRIVATE NetworkService::Platform)
     add_test(NAME wpa_ctrl_client COMMAND wpa_ctrl_client_test)
 
+    add_executable(wpa_event_monitor_test
+        tests/wpa_event_monitor_test.cpp
+    )
+    target_link_libraries(wpa_event_monitor_test PRIVATE NetworkService::Platform)
+    add_test(NAME wpa_event_monitor COMMAND wpa_event_monitor_test)
+
     add_executable(network_state_change_detector_test
         tests/network_state_change_detector_test.cpp
     )
