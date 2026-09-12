@@ -137,6 +137,7 @@ if(BUILD_TESTING)
     add_executable(network_control_plane_test
         tests/network_control_plane_test.cpp
         src/service/network_control_plane.cpp
+        src/platform/dhcp_lease_store.cpp
     )
     target_include_directories(network_control_plane_test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
