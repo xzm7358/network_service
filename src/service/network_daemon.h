@@ -11,15 +11,16 @@
 #include "config/ethernet_config.h"
 #include "network_service_types.h"
 #include "platform/wifi_backend.h"
-#include "platform/wpa_event_monitor.h"
 #include "service/network_operation_result.h"
 #include "service/wifi_scan_lifecycle.h"
+#include "service/wpa_events_view.h"
 
 namespace network_service {
 
 class NetlinkMonitor;
 class NetworkControlPlane;
 class WifiManager;
+class WpaEventMonitor;
 
 class NetworkDaemon {
 public:
@@ -32,24 +33,17 @@ public:
                   SnapshotProvider snapshot_provider = {});
     ~NetworkDaemon();
 
-    // Fast DHCP lease-fact reconciliation. Does not perform periodic full-state
-    // observation when lease facts are unchanged.
     bool reconcile(std::string &error);
     bool reconcile(bool &changed, std::string &error);
-
-    // Refresh policy that depends on externally-managed route/DNS state.
     bool refresh_external_state(std::string &error);
 
-    // Service facade for reactor-owned event handling. IPC remains independent
-    // of Netlink/WPA implementation types.
     int network_event_fd() const;
     bool consume_network_events(bool &changed, std::string &error);
     bool consume_runtime_state_dirty();
 
-    // Typed Service API. Representation/JSON ownership belongs exclusively to IPC.
     NetworkSnapshot snapshot() const;
     PingInfo ping() const;
-    NetworkOperationResult<WpaEventSnapshot> wpa_events() const;
+    NetworkOperationResult<WpaEventsView> wpa_events() const;
     NetworkOperationResult<EthernetConfig> eth_get_config() const;
     NetworkOperationResult<EthernetConfig> eth_set_dhcp() const;
     NetworkOperationResult<EthernetConfig> eth_set_static(const std::string &ip,
