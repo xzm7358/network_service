@@ -185,6 +185,12 @@ if(BUILD_TESTING)
     target_link_libraries(network_state_test PRIVATE NetworkService::Service)
     add_test(NAME network_state COMMAND network_state_test)
 
+    add_executable(service_contract_visibility_test
+        tests/service_contract_visibility_test.cpp
+    )
+    target_link_libraries(service_contract_visibility_test PRIVATE NetworkService::Service)
+    add_test(NAME service_contract_visibility COMMAND service_contract_visibility_test)
+
     add_executable(dhcp_lease_store_test
         tests/dhcp_lease_store_test.cpp
     )
