@@ -43,6 +43,7 @@ public:
     // Fast cadence: consume DHCP lease facts only. External network state is not
     // sampled unless a lease transition requires policy recomputation.
     bool reconcile(std::string &error);
+    bool reconcile(bool &changed, std::string &error);
 
     // Event/fallback path: refresh policy that depends on externally-managed
     // route/DNS facts without touching DHCP lifecycle.
