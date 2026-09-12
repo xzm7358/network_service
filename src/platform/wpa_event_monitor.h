@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -39,7 +40,11 @@ struct WpaEventSnapshot {
 
 class WpaEventMonitor {
 public:
-    WpaEventMonitor(std::string iface, std::string ctrl_dir);
+    using LinkStateHandler = std::function<void(bool connected)>;
+
+    WpaEventMonitor(std::string iface,
+                    std::string ctrl_dir,
+                    LinkStateHandler link_state_handler = {});
     ~WpaEventMonitor();
 
     WpaEventMonitor(const WpaEventMonitor &) = delete;
@@ -52,10 +57,10 @@ public:
 private:
     void run();
     void update_event(const std::string &event);
-    bool handle_connected_event();
 
     std::string iface_;
     std::string ctrl_dir_;
+    LinkStateHandler link_state_handler_;
     std::atomic<bool> running_{false};
     std::thread thread_;
     mutable std::mutex lock_;
