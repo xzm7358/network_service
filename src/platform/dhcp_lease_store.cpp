@@ -47,22 +47,6 @@ DhcpLeaseEvent parse_event(const std::string &value) {
 
 } // namespace
 
-bool DhcpLeaseFact::configured() const {
-    return event == DhcpLeaseEvent::Bound || event == DhcpLeaseEvent::Renew;
-}
-
-std::string DhcpLeaseFact::fingerprint() const {
-    std::ostringstream os;
-    os << static_cast<int>(event) << '\x1f'
-       << iface << '\x1f'
-       << generation << '\x1f'
-       << ip4 << '\x1f'
-       << netmask4 << '\x1f'
-       << gateway4 << '\x1f'
-       << dns4;
-    return os.str();
-}
-
 std::string DhcpLeaseStore::path_for(const std::string &iface,
                                      const std::string &generation) {
     return "/tmp/network_service_dhcp_" + iface + "_" + generation + ".lease";
