@@ -121,6 +121,8 @@ bool NetworkControlPlane::apply_ethernet_static(const std::string &ip4,
     }
 
     static_eth_.active = true;
+    static_eth_.ip4 = ip4;
+    static_eth_.netmask4 = netmask4;
     static_eth_.gateway4 = gateway4;
     static_eth_.dns4 = dns4;
     static_eth_.manual_metric = manual_metric;
@@ -201,15 +203,19 @@ bool NetworkControlPlane::reconcile(std::string &error) {
     if (!reconcile_link_locked(eth_iface_, eth_, eth_changed, error)) return false;
     if (!reconcile_link_locked(wifi_iface_, wifi_, wifi_changed, error)) return false;
 
-    // Preserve the historical full-reconcile API: callers that explicitly ask
-    // for reconciliation also refresh externally-managed Ethernet/DNS state.
-    // The 250 ms reactor fast path uses the changed-aware overload instead.
+    // Full reconciliation is used when Netlink is unavailable. In that mode it
+    // must both consume new lease facts and repair drift in state we already own.
+    if (!repair_owned_state_locked(error)) return false;
     return recompute_dns_locked(error);
 }
 
 bool NetworkControlPlane::refresh_external_state(std::string &error) {
     std::lock_guard<std::mutex> guard(lock_);
     error.clear();
+    // Netlink is an observation trigger, not an owner. Read authoritative state,
+    // repair only resources for which Service already has explicit desired facts,
+    // then recompute DNS/readiness policy.
+    if (!repair_owned_state_locked(error)) return false;
     return recompute_dns_locked(error);
 }
 
