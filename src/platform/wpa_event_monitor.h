@@ -49,7 +49,7 @@ struct WpaEventSnapshot {
 
 class WpaEventMonitor {
 public:
-    using LinkStateHandler = std::function<void(bool connected)>;
+    using LinkStateHandler = std::function<void(WifiL2State state)>;
 
     WpaEventMonitor(std::string iface,
                     std::string ctrl_dir,
@@ -65,7 +65,7 @@ public:
 
 private:
     void run();
-    void update_event(const std::string &event);
+    WifiL2State update_event(const std::string &event, bool &l2_changed);
 
     std::string iface_;
     std::string ctrl_dir_;
