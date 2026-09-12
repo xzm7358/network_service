@@ -12,6 +12,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <vector>
 
 #include "platform/dhcp_lease_store.h"
 
@@ -53,49 +54,85 @@ bool run_command(const std::string &cmd, std::string &error) {
     return true;
 }
 
-bool pid_matches_udhcpc_iface(int pid, const std::string &iface) {
-#ifdef __linux__
-    if (pid <= 1 || !is_safe_iface(iface)) return false;
+bool path_exists(const std::string &path) {
+    return access(path.c_str(), F_OK) == 0;
+}
 
+bool read_pidfile(const std::string &iface, int &pid) {
+    pid = -1;
+    std::ifstream f(UdhcpcProcess::pidfile_for(iface));
+    return static_cast<bool>(f >> pid) && pid > 1;
+}
+
+bool read_process_args(int pid, std::vector<std::string> &args) {
+    args.clear();
+#ifdef __linux__
+    if (pid <= 1) return false;
     std::ifstream f("/proc/" + std::to_string(pid) + "/cmdline", std::ios::binary);
     if (!f) return false;
     const std::string cmdline((std::istreambuf_iterator<char>(f)),
                               std::istreambuf_iterator<char>());
     if (cmdline.empty()) return false;
 
-    bool has_udhcpc = false;
-    bool has_iface = false;
-    std::string previous;
     std::size_t start = 0;
     while (start < cmdline.size()) {
         const std::size_t end = cmdline.find('\0', start);
         const std::size_t count =
             end == std::string::npos ? cmdline.size() - start : end - start;
-        const std::string arg = cmdline.substr(start, count);
-        if (!has_udhcpc && arg.find("udhcpc") != std::string::npos) {
-            has_udhcpc = true;
-        }
-        if (previous == "-i" && arg == iface) {
-            has_iface = true;
-        }
-        previous = arg;
+        if (count > 0) args.push_back(cmdline.substr(start, count));
         if (end == std::string::npos) break;
         start = end + 1;
     }
-    return has_udhcpc && has_iface;
+    return !args.empty();
 #else
     (void)pid;
-    (void)iface;
     return false;
 #endif
 }
 
-bool read_owned_pid(const std::string &iface, int &pid) {
-    pid = -1;
-    if (!is_safe_iface(iface)) return false;
-    std::ifstream f(UdhcpcProcess::pidfile_for(iface));
-    if (!(f >> pid)) return false;
-    return pid_matches_udhcpc_iface(pid, iface);
+bool basename_is_udhcpc(const std::string &arg) {
+    const std::size_t slash = arg.find_last_of('/');
+    const std::string base = slash == std::string::npos ? arg : arg.substr(slash + 1);
+    return base == "udhcpc";
+}
+
+bool has_arg(const std::vector<std::string> &args, const std::string &wanted) {
+    for (const auto &arg : args) {
+        if (arg == wanted) return true;
+    }
+    return false;
+}
+
+bool has_option_value(const std::vector<std::string> &args,
+                      const std::string &option,
+                      const std::string &value) {
+    for (std::size_t i = 1; i < args.size(); ++i) {
+        if (args[i - 1] == option && args[i] == value) return true;
+    }
+    return false;
+}
+
+bool matches_udhcpc_iface(const std::vector<std::string> &args,
+                          const std::string &iface) {
+    bool has_udhcpc = false;
+    for (const auto &arg : args) {
+        if (basename_is_udhcpc(arg)) {
+            has_udhcpc = true;
+            break;
+        }
+    }
+    return has_udhcpc && has_option_value(args, "-i", iface);
+}
+
+bool matches_owned_process(const std::vector<std::string> &args,
+                           const std::string &iface,
+                           const std::string &generation) {
+    if (!matches_udhcpc_iface(args, iface) || generation.empty()) return false;
+    return has_arg(args, "-f") &&
+           has_option_value(args, "-p", UdhcpcProcess::pidfile_for(iface)) &&
+           has_option_value(args,
+                            "-s",
+                            UdhcpcProcess::event_script_path(iface, generation));
 }
 
 std::string next_generation() {
@@ -178,12 +215,70 @@ std::string UdhcpcProcess::event_script_path(const std::string &iface,
     return "/tmp/network_service_udhcpc_" + iface + "_" + generation + ".script";
 }
 
-bool UdhcpcProcess::is_running(const std::string &iface) {
+bool UdhcpcProcess::probe(const std::string &iface,
+                          UdhcpcProbeResult &result,
+                          std::string &error) {
+    result = UdhcpcProbeResult{};
+    error.clear();
+    if (!is_safe_iface(iface)) {
+        error = "invalid DHCP iface";
+        return false;
+    }
+
+    std::string generation;
+    bool generation_exists = false;
+    if (!DhcpLeaseStore::active_generation(iface,
+                                            generation,
+                                            generation_exists,
+                                            error)) {
+        return false;
+    }
+    if (generation_exists) {
+        result.generation = generation;
+        result.lease_exists = path_exists(DhcpLeaseStore::path_for(iface, generation));
+    }
+
     int pid = -1;
-    return read_owned_pid(iface, pid);
+    const bool pidfile_exists = path_exists(pidfile_for(iface));
+    if (!read_pidfile(iface, pid)) {
+        result.state = (pidfile_exists || generation_exists)
+                           ? UdhcpcOwnershipState::StaleArtifacts
+                           : UdhcpcOwnershipState::Absent;
+        return true;
+    }
+    result.pid = pid;
+
+    std::vector<std::string> args;
+    if (!read_process_args(pid, args)) {
+        result.state = UdhcpcOwnershipState::StaleArtifacts;
+        return true;
+    }
+    if (!matches_udhcpc_iface(args, iface)) {
+        // PID reuse or an unrelated process cannot own DHCP for this interface.
+        result.state = UdhcpcOwnershipState::StaleArtifacts;
+        return true;
+    }
+
+    if (!generation_exists || !matches_owned_process(args, iface, generation) ||
+        !path_exists(event_script_path(iface, generation))) {
+        // A live DHCP process exists but its identity is not complete enough to
+        // adopt or signal safely. Preserve it and surface an ownership conflict.
+        result.state = UdhcpcOwnershipState::ConflictingProcess;
+        return true;
+    }
+
+    result.state = UdhcpcOwnershipState::OwnedRunning;
+    return true;
 }
 
-void UdhcpcProcess::stop(const std::string &iface) {
+bool UdhcpcProcess::is_running(const std::string &iface) {
+    UdhcpcProbeResult result;
+    std::string ignored;
+    return probe(iface, result, ignored) &&
+           result.state == UdhcpcOwnershipState::OwnedRunning;
+}
+
+void UdhcpcProcess::cleanup_stale(const std::string &iface) {
     if (!is_safe_iface(iface)) return;
 
     std::string generation;
@@ -194,16 +289,45 @@ void UdhcpcProcess::stop(const std::string &iface) {
                                             generation_exists,
                                             ignored);
 
-    int pid = -1;
-    if (read_owned_pid(iface, pid)) {
-        (void)kill(pid, SIGTERM);
-    }
     (void)unlink(pidfile_for(iface).c_str());
-
     if (generation_exists) {
         (void)unlink(event_script_path(iface, generation).c_str());
     }
     DhcpLeaseStore::clear(iface);
+}
+
+void UdhcpcProcess::stop(const std::string &iface) {
+    if (!is_safe_iface(iface)) return;
+
+    UdhcpcProbeResult probe_result;
+    std::string ignored;
+    if (!probe(iface, probe_result, ignored)) return;
+
+    if (probe_result.state == UdhcpcOwnershipState::ConflictingProcess) {
+        // Ownership identity is incomplete. Never kill or erase another owner's
+        // live DHCP process merely because our pidfile path references it.
+        return;
+    }
+
+    if (probe_result.state == UdhcpcOwnershipState::OwnedRunning) {
+        (void)kill(probe_result.pid, SIGTERM);
+        for (int i = 0; i < 20; ++i) {
+            std::vector<std::string> args;
+            if (!read_process_args(probe_result.pid, args) ||
+                !matches_owned_process(args, iface, probe_result.generation)) {
+                break;
+            }
+            usleep(25 * 1000);
+        }
+
+        std::vector<std::string> args;
+        if (read_process_args(probe_result.pid, args) &&
+            matches_owned_process(args, iface, probe_result.generation)) {
+            (void)kill(probe_result.pid, SIGKILL);
+        }
+    }
+
+    cleanup_stale(iface);
 }
 
 bool UdhcpcProcess::start(const std::string &iface, std::string &error) {
@@ -213,7 +337,17 @@ bool UdhcpcProcess::start(const std::string &iface, std::string &error) {
         return false;
     }
 
-    stop(iface);
+    UdhcpcProbeResult existing;
+    if (!probe(iface, existing, error)) return false;
+    if (existing.state == UdhcpcOwnershipState::ConflictingProcess) {
+        error = "conflicting DHCP process prevents NetworkService ownership";
+        return false;
+    }
+    if (existing.state == UdhcpcOwnershipState::OwnedRunning) {
+        stop(iface);
+    } else if (existing.state == UdhcpcOwnershipState::StaleArtifacts) {
+        cleanup_stale(iface);
+    }
 
     const std::string generation = next_generation();
     if (!DhcpLeaseStore::activate_generation(iface, generation, error)) return false;
