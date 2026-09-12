@@ -184,7 +184,7 @@ jobs:
                 clang++ --analyze -std=c++17 "${public[@]}" "${platform[@]}" "${service[@]}" "$f"
                 ;;
               src/ipc/*|src/main.cpp)
-                clang++ --analyze -std=c++17 "${public[@]}" "${platform[@]}" "${service[@]}" "${ipc[@]}" "$f"
+                clang++ --analyze -std=c++17 "${public[@]}" "${service[@]}" "${ipc[@]}" "$f"
                 ;;
               *)
                 echo "unexpected translation unit: $f" >&2
@@ -194,5 +194,5 @@ jobs:
           done < <(find src -type f -name '*.cpp' | sort)
 
           clang++ --analyze -std=c++17 \
-            "${public[@]}" "${platform[@]}" "${service[@]}" "${ipc[@]}" \
+            "${public[@]}" "${service[@]}" "${ipc[@]}" \
             tools/rc/network_service_rc_probe.cpp
