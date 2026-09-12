@@ -33,6 +33,11 @@ public:
     bool start_dhcp(const std::string &iface, std::string &error);
     void stop_dhcp(const std::string &iface);
 
+    // Imports an already-running NetworkService-owned DHCP lifecycle without
+    // stopping the process or clearing its lease/IP/route state. Platform
+    // ownership identity must be verified before this Service entrypoint is used.
+    bool adopt_dhcp(const std::string &iface, std::string &error);
+
     bool apply_ethernet_static(const std::string &ip4,
                                const std::string &netmask4,
                                const std::string &gateway4,

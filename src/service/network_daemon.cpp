@@ -75,6 +75,49 @@ static WifiCommandResult command_result(std::string requested) {
     return result;
 }
 
+static void adopt_existing_dhcp(const std::string &iface,
+                                NetworkControlPlane &control_plane,
+                                WifiManager *wifi_manager) {
+    UdhcpcProbeResult probe;
+    std::string error;
+    if (!UdhcpcProcess::probe(iface, probe, error)) {
+        std::cerr << "network_service: DHCP_BROWNFIELD_PROBE_FAILED iface="
+                  << iface << " error=" << error << std::endl;
+        return;
+    }
+
+    switch (probe.state) {
+    case UdhcpcOwnershipState::OwnedRunning:
+        if (!control_plane.adopt_dhcp(iface, error)) {
+            std::cerr << "network_service: DHCP_BROWNFIELD_ADOPT_FAILED iface="
+                      << iface << " error=" << error << std::endl;
+            return;
+        }
+        if (wifi_manager) wifi_manager->adopt_dhcp_running();
+        std::cerr << "network_service: DHCP_BROWNFIELD_ADOPTED iface=" << iface
+                  << " pid=" << probe.pid
+                  << " generation=" << probe.generation
+                  << " lease=" << (probe.lease_exists ? "present" : "pending")
+                  << std::endl;
+        return;
+
+    case UdhcpcOwnershipState::StaleArtifacts:
+        UdhcpcProcess::cleanup_stale(iface);
+        std::cerr << "network_service: DHCP_BROWNFIELD_STALE_CLEANUP iface="
+                  << iface << std::endl;
+        return;
+
+    case UdhcpcOwnershipState::ConflictingProcess:
+        std::cerr << "network_service: DHCP_BROWNFIELD_CONFLICT iface=" << iface
+                  << " pid=" << probe.pid << std::endl;
+        return;
+
+    case UdhcpcOwnershipState::Absent:
+    default:
+        return;
+    }
+}
+
 } // namespace
 
 NetworkDaemon::NetworkDaemon(std::string eth_iface,
@@ -145,6 +188,15 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
         [this]() {
             return UdhcpcProcess::is_running(wifi_iface_);
         }));
+
+    // Deterministic injected-snapshot fixtures must remain isolated from host
+    // process artifacts. Production construction adopts verified owned DHCP
+    // processes before WPA monitoring can emit a CONNECTED event and start a
+    // duplicate lifecycle.
+    if (!snapshot_provider_) {
+        adopt_existing_dhcp(eth_iface_, *control_plane_, nullptr);
+        adopt_existing_dhcp(wifi_iface_, *control_plane_, wifi_manager_.get());
+    }
 
     WifiProfilePolicyOps profile_ops;
     profile_ops.ensure_interface_up = [this](std::string &error) {

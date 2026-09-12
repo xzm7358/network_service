@@ -31,6 +31,10 @@ public:
     void on_l2_disconnected();
     void stop_dhcp();
 
+    // Imports a Platform-verified already-running DHCP client. This does not
+    // invent an L2 CONNECTED fact; WpaEventMonitor/authoritative resync owns L2.
+    void adopt_dhcp_running();
+
     // Reconciles Service lifecycle intent against Platform process truth. Returns
     // true only when the externally visible lifecycle state changed.
     bool reconcile_dhcp_process();
