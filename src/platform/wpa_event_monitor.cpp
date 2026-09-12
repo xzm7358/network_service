@@ -2,7 +2,6 @@
 
 #include <cerrno>
 #include <poll.h>
-#include <sstream>
 #include <utility>
 #include <unistd.h>
 
@@ -11,22 +10,6 @@
 namespace network_service {
 
 namespace {
-
-static std::string json_escape(const std::string &value) {
-    std::string out;
-    out.reserve(value.size() + 8);
-    for (char ch : value) {
-        switch (ch) {
-        case '\\': out += "\\\\"; break;
-        case '"': out += "\\\""; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default: out += ch; break;
-        }
-    }
-    return out;
-}
 
 static std::string field_after(const std::string &event, const char *key) {
     std::string needle = key;
@@ -40,9 +23,7 @@ static std::string field_after(const std::string &event, const char *key) {
 
 static std::string normalize_event(const std::string &event) {
     size_t pos = event.find("CTRL-EVENT-");
-    if (pos == std::string::npos) {
-        return event;
-    }
+    if (pos == std::string::npos) return event;
     return event.substr(pos);
 }
 
@@ -95,9 +76,12 @@ static const char *legacy_state_for_l2(WifiL2State state) {
 
 static const char *failure_reason_for_event(const std::string &event) {
     if (event.find("WRONG_KEY") != std::string::npos) return "wrong_key";
-    if (event.find("CTRL-EVENT-SSID-TEMP-DISABLED") != std::string::npos) return "ssid_temp_disabled";
-    if (event.find("CTRL-EVENT-ASSOC-REJECT") != std::string::npos) return "assoc_reject";
-    if (event.find("CTRL-EVENT-AUTH-REJECT") != std::string::npos) return "auth_reject";
+    if (event.find("CTRL-EVENT-SSID-TEMP-DISABLED") != std::string::npos)
+        return "ssid_temp_disabled";
+    if (event.find("CTRL-EVENT-ASSOC-REJECT") != std::string::npos)
+        return "assoc_reject";
+    if (event.find("CTRL-EVENT-AUTH-REJECT") != std::string::npos)
+        return "auth_reject";
     return "";
 }
 
@@ -115,19 +99,13 @@ WpaEventMonitor::~WpaEventMonitor() {
 }
 
 void WpaEventMonitor::start() {
-    if (running_.exchange(true)) {
-        return;
-    }
+    if (running_.exchange(true)) return;
     thread_ = std::thread(&WpaEventMonitor::run, this);
 }
 
 void WpaEventMonitor::stop() {
-    if (!running_.exchange(false)) {
-        return;
-    }
-    if (thread_.joinable()) {
-        thread_.join();
-    }
+    if (!running_.exchange(false)) return;
+    if (thread_.joinable()) thread_.join();
 }
 
 WpaEventSnapshot WpaEventMonitor::snapshot() const {
@@ -238,42 +216,8 @@ void WpaEventMonitor::run() {
             snapshot_.attached = false;
         }
         ctrl.close();
-        if (running_) {
-            usleep(1000 * 1000);
-        }
+        if (running_) usleep(1000 * 1000);
     }
-}
-
-std::string wpa_event_snapshot_to_json(const WpaEventSnapshot &snapshot) {
-    std::ostringstream os;
-    os << "{"
-       << "\"attached\":" << (snapshot.attached ? "true" : "false") << ","
-       << "\"connected\":" << (snapshot.connected ? "true" : "false") << ","
-       << "\"disconnected\":" << (snapshot.disconnected ? "true" : "false") << ","
-       << "\"dhcp_requested\":" << (snapshot.dhcp_requested ? "true" : "false") << ","
-       << "\"has_ip\":" << (snapshot.has_ip ? "true" : "false") << ","
-       << "\"has_default_route\":" << (snapshot.has_default_route ? "true" : "false") << ","
-       << "\"dns_available\":" << (snapshot.dns_available ? "true" : "false") << ","
-       << "\"ip4\":\"" << json_escape(snapshot.ip4) << "\","
-       << "\"gateway4\":\"" << json_escape(snapshot.gateway4) << "\","
-       << "\"dns4\":\"" << json_escape(snapshot.dns4) << "\","
-       << "\"connect_events\":" << snapshot.connect_events << ","
-       << "\"disconnect_events\":" << snapshot.disconnect_events << ","
-       << "\"dhcp_requests\":" << snapshot.dhcp_requests << ","
-       << "\"scan_started_events\":" << snapshot.scan_started_events << ","
-       << "\"scan_result_events\":" << snapshot.scan_result_events << ","
-       << "\"scan_failed_events\":" << snapshot.scan_failed_events << ","
-       << "\"event_sequence\":" << snapshot.event_sequence << ","
-       << "\"last_scan_started_sequence\":" << snapshot.last_scan_started_sequence << ","
-       << "\"last_scan_result_sequence\":" << snapshot.last_scan_result_sequence << ","
-       << "\"last_scan_failed_sequence\":" << snapshot.last_scan_failed_sequence << ","
-       << "\"wifi_state\":\"" << json_escape(snapshot.wifi_state) << "\","
-       << "\"failure_reason\":\"" << json_escape(snapshot.failure_reason) << "\","
-       << "\"last_event\":\"" << json_escape(snapshot.last_event) << "\","
-       << "\"last_ssid\":\"" << json_escape(snapshot.last_ssid) << "\","
-       << "\"last_bssid\":\"" << json_escape(snapshot.last_bssid) << "\""
-       << "}";
-    return os.str();
 }
 
 } // namespace network_service
