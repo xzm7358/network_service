@@ -212,21 +212,11 @@ NetworkSnapshot read_live_snapshot(const char *eth_iface, const char *wifi_iface
     populate_default_routes(snapshot);
 #endif
 
-    snapshot.wifi.connected = snapshot.wifi.has_ip;
-    snapshot.eth.connected = snapshot.eth.carrier_up && snapshot.eth.has_ip;
     snapshot.dns4 = read_first_dns();
     snapshot.dns_available = !snapshot.dns4.empty();
 
-    if (snapshot.eth.has_default_route) {
-        snapshot.primary_iface = snapshot.eth.iface;
-    }
-    if (snapshot.wifi.has_default_route &&
-        (!snapshot.eth.has_default_route ||
-         snapshot.wifi.route_metric < snapshot.eth.route_metric)) {
-        snapshot.primary_iface = snapshot.wifi.iface;
-    }
-
-    snapshot.online = !snapshot.primary_iface.empty() && snapshot.dns_available;
+    // This platform function intentionally returns raw kernel/filesystem facts.
+    // Service/Policy owns connected/ip_state/primary_iface/network_ready/online.
     return snapshot;
 }
 
