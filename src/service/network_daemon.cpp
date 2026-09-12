@@ -13,6 +13,7 @@
 #include "platform/netlink_monitor.h"
 #include "platform/network_configurator.h"
 #include "platform/udhcpc_process.h"
+#include "platform/wpa_event_monitor.h"
 #include "service/network_control_plane.h"
 #include "service/network_state.h"
 #include "service/wifi_manager.h"
@@ -21,7 +22,7 @@ namespace network_service {
 
 namespace {
 
-static WifiRuntimeFact make_wifi_runtime_fact(const WpaEventSnapshot &events,
+static WifiRuntimeFact make_wifi_runtime_fact(const WpaEventFact &events,
                                               const WifiManagerState &manager) {
     WifiRuntimeFact fact;
     fact.l2_state = events.l2_state;
@@ -32,28 +33,37 @@ static WifiRuntimeFact make_wifi_runtime_fact(const WpaEventSnapshot &events,
     return fact;
 }
 
-static void project_wpa_compatibility(WpaEventSnapshot &events,
-                                      const NetworkSnapshot &truth,
-                                      const WifiManagerState &manager) {
+static WpaEventsView project_wpa_compatibility(const WpaEventFact &events,
+                                               const NetworkSnapshot &truth,
+                                               const WifiManagerState &manager) {
     const WifiRuntimeFact runtime = make_wifi_runtime_fact(events, manager);
-
-    events.connected = truth.wifi.connected;
-    events.disconnected = runtime.l2_state == WifiL2State::Disconnected;
-    events.dhcp_requested = manager.dhcp_requested;
-    events.dhcp_requests = manager.dhcp_requests;
-    events.has_ip = truth.wifi.has_ip;
-    events.has_default_route = truth.wifi.has_default_route;
-    events.dns_available = truth.dns_available;
-    events.ip4 = truth.wifi.ip4;
-    events.gateway4 = truth.wifi.gateway4;
-    events.dns4 = truth.dns4;
-    events.wifi_state = legacy_wifi_state(truth, runtime);
-
-    if (!runtime.failure_reason.empty()) {
-        events.failure_reason = runtime.failure_reason;
-    } else if (runtime.l2_state != WifiL2State::Failed) {
-        events.failure_reason.clear();
-    }
+    WpaEventsView view;
+    view.attached = events.attached;
+    view.connected = truth.wifi.connected;
+    view.disconnected = runtime.l2_state == WifiL2State::Disconnected;
+    view.dhcp_requested = manager.dhcp_requested;
+    view.has_ip = truth.wifi.has_ip;
+    view.has_default_route = truth.wifi.has_default_route;
+    view.dns_available = truth.dns_available;
+    view.ip4 = truth.wifi.ip4;
+    view.gateway4 = truth.wifi.gateway4;
+    view.dns4 = truth.dns4;
+    view.connect_events = events.connect_events;
+    view.disconnect_events = events.disconnect_events;
+    view.dhcp_requests = manager.dhcp_requests;
+    view.scan_started_events = events.scan_started_events;
+    view.scan_result_events = events.scan_result_events;
+    view.scan_failed_events = events.scan_failed_events;
+    view.event_sequence = events.event_sequence;
+    view.last_scan_started_sequence = events.last_scan_started_sequence;
+    view.last_scan_result_sequence = events.last_scan_result_sequence;
+    view.last_scan_failed_sequence = events.last_scan_failed_sequence;
+    view.wifi_state = legacy_wifi_state(truth, runtime);
+    view.failure_reason = runtime.failure_reason;
+    view.last_event = events.last_event;
+    view.last_ssid = events.last_ssid;
+    view.last_bssid = events.last_bssid;
+    return view;
 }
 
 static WifiCommandResult command_result(std::string requested) {
@@ -113,8 +123,6 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
     ops.clear_dns = [](std::string &error) {
         return NetworkConfigurator::clear_dns(error);
     };
-    // ControlPlane policy needs raw external route/DNS facts, not a normalized
-    // Service snapshot that would re-enter WifiManager while its lock is held.
     ops.snapshot = [this]() {
         return read_live_snapshot(eth_iface_.c_str(), wifi_iface_.c_str());
     };
@@ -152,7 +160,7 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
             return network_service::wifi_scan_results(wifi_iface_, error);
         },
         [this]() {
-            const WpaEventSnapshot events = wpa_monitor_->snapshot();
+            const WpaEventFact events = wpa_monitor_->snapshot();
             WifiScanEventMarkers markers;
             markers.sequence = events.event_sequence;
             markers.started_sequence = events.last_scan_started_sequence;
@@ -161,8 +169,6 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
             return markers;
         }));
 
-    // Deterministic fixture construction intentionally disables host Netlink so
-    // external machine activity cannot perturb contract-test event sequencing.
     if (!snapshot_provider_) {
         netlink_monitor_.reset(new NetlinkMonitor());
         std::string netlink_error;
@@ -209,7 +215,7 @@ NetworkSnapshot NetworkDaemon::snapshot() const {
     if (snapshot_provider_) return snapshot_provider_();
 
     NetworkSnapshot truth = read_live_snapshot(eth_iface_.c_str(), wifi_iface_.c_str());
-    WpaEventSnapshot events;
+    WpaEventFact events;
     WifiManagerState manager;
     if (wpa_monitor_) events = wpa_monitor_->snapshot();
     if (wifi_manager_) manager = wifi_manager_->state();
@@ -227,15 +233,13 @@ PingInfo NetworkDaemon::ping() const {
     return info;
 }
 
-NetworkOperationResult<WpaEventSnapshot> NetworkDaemon::wpa_events() const {
-    WpaEventSnapshot events;
-    if (wpa_monitor_) {
-        events = wpa_monitor_->snapshot();
-        WifiManagerState manager;
-        if (wifi_manager_) manager = wifi_manager_->state();
-        project_wpa_compatibility(events, snapshot(), manager);
-    }
-    return NetworkOperationResult<WpaEventSnapshot>::success(std::move(events));
+NetworkOperationResult<WpaEventsView> NetworkDaemon::wpa_events() const {
+    WpaEventFact events;
+    WifiManagerState manager;
+    if (wpa_monitor_) events = wpa_monitor_->snapshot();
+    if (wifi_manager_) manager = wifi_manager_->state();
+    return NetworkOperationResult<WpaEventsView>::success(
+        project_wpa_compatibility(events, snapshot(), manager));
 }
 
 NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_get_config() const {
