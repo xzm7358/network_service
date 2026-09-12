@@ -14,6 +14,7 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/main.cpp
     src/service/network_daemon.cpp
     src/service/network_state_change_detector.cpp
+    src/service/wifi_manager.cpp
     src/service/wifi_scan_lifecycle.cpp
     src/ipc/network_ipc_server.cpp
     src/ipc/network_ipc_v1_business_dispatch.cpp
@@ -120,6 +121,16 @@ if(BUILD_TESTING)
     )
     add_test(NAME wifi_scan_lifecycle COMMAND wifi_scan_lifecycle_test)
 
+    add_executable(wifi_manager_test
+        tests/wifi_manager_test.cpp
+        src/service/wifi_manager.cpp
+    )
+    target_include_directories(wifi_manager_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(wifi_manager_test PRIVATE pthread)
+    add_test(NAME wifi_manager COMMAND wifi_manager_test)
+
     add_executable(wpa_ctrl_client_test
         tests/wpa_ctrl_client_test.cpp
         src/platform/wpa_ctrl_client.cpp
@@ -144,6 +155,7 @@ if(BUILD_TESTING)
         tests/network_state_event_integration_test.cpp
         src/service/network_daemon.cpp
         src/service/network_state_change_detector.cpp
+        src/service/wifi_manager.cpp
         src/service/wifi_scan_lifecycle.cpp
         src/ipc/network_ipc_server.cpp
         src/ipc/network_ipc_v1_business_dispatch.cpp
@@ -177,6 +189,7 @@ if(BUILD_TESTING)
         tests/network_service_e2e_fixture_main.cpp
         src/service/network_daemon.cpp
         src/service/network_state_change_detector.cpp
+        src/service/wifi_manager.cpp
         src/service/wifi_scan_lifecycle.cpp
         src/ipc/network_ipc_server.cpp
         src/ipc/network_ipc_v1_business_dispatch.cpp
