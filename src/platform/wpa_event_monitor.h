@@ -20,7 +20,7 @@ struct WpaEventSnapshot {
     WifiL2State l2_state = WifiL2State::Unknown;
     bool scan_active = false;
 
-    // Legacy compatibility fields retained for wpa.events serialization.
+    // Legacy compatibility fields retained as typed data for IPC projection.
     bool connected = false;
     bool disconnected = false;
     bool dhcp_requested = false;
@@ -75,8 +75,6 @@ private:
     mutable std::mutex lock_;
     WpaEventSnapshot snapshot_;
 };
-
-std::string wpa_event_snapshot_to_json(const WpaEventSnapshot &snapshot);
 
 } // namespace network_service
 
