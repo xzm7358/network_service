@@ -14,6 +14,7 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/main.cpp
     src/service/network_daemon.cpp
     src/service/network_state_change_detector.cpp
+    src/service/wifi_manager.cpp
     src/service/wifi_scan_lifecycle.cpp
     src/ipc/network_ipc_server.cpp
     src/ipc/network_ipc_v1_business_dispatch.cpp
@@ -25,6 +26,7 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/platform/interface_snapshot.cpp
     src/config/ethernet_config.cpp
     src/platform/ethernet_apply.cpp
+    src/platform/udhcpc_process.cpp
     src/platform/wifi_backend.cpp
     src/platform/wpa_ctrl_client.cpp
     src/platform/wpa_event_monitor.cpp
@@ -119,6 +121,25 @@ if(BUILD_TESTING)
     )
     add_test(NAME wifi_scan_lifecycle COMMAND wifi_scan_lifecycle_test)
 
+    add_executable(wifi_manager_test
+        tests/wifi_manager_test.cpp
+        src/service/wifi_manager.cpp
+    )
+    target_include_directories(wifi_manager_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(wifi_manager_test PRIVATE pthread)
+    add_test(NAME wifi_manager COMMAND wifi_manager_test)
+
+    add_executable(udhcpc_process_test
+        tests/udhcpc_process_test.cpp
+        src/platform/udhcpc_process.cpp
+    )
+    target_include_directories(udhcpc_process_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME udhcpc_process COMMAND udhcpc_process_test)
+
     add_executable(wpa_ctrl_client_test
         tests/wpa_ctrl_client_test.cpp
         src/platform/wpa_ctrl_client.cpp
@@ -143,6 +164,7 @@ if(BUILD_TESTING)
         tests/network_state_event_integration_test.cpp
         src/service/network_daemon.cpp
         src/service/network_state_change_detector.cpp
+        src/service/wifi_manager.cpp
         src/service/wifi_scan_lifecycle.cpp
         src/ipc/network_ipc_server.cpp
         src/ipc/network_ipc_v1_business_dispatch.cpp
@@ -154,6 +176,7 @@ if(BUILD_TESTING)
         src/platform/interface_snapshot.cpp
         src/config/ethernet_config.cpp
         src/platform/ethernet_apply.cpp
+        src/platform/udhcpc_process.cpp
         src/platform/wifi_backend.cpp
         src/platform/wpa_ctrl_client.cpp
         src/platform/wpa_event_monitor.cpp
@@ -175,6 +198,7 @@ if(BUILD_TESTING)
         tests/network_service_e2e_fixture_main.cpp
         src/service/network_daemon.cpp
         src/service/network_state_change_detector.cpp
+        src/service/wifi_manager.cpp
         src/service/wifi_scan_lifecycle.cpp
         src/ipc/network_ipc_server.cpp
         src/ipc/network_ipc_v1_business_dispatch.cpp
@@ -186,6 +210,7 @@ if(BUILD_TESTING)
         src/platform/interface_snapshot.cpp
         src/config/ethernet_config.cpp
         src/platform/ethernet_apply.cpp
+        src/platform/udhcpc_process.cpp
         src/platform/wifi_backend.cpp
         src/platform/wpa_ctrl_client.cpp
         src/platform/wpa_event_monitor.cpp

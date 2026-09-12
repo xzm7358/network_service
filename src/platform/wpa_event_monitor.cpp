@@ -1,13 +1,11 @@
 #include "platform/wpa_event_monitor.h"
 
 #include <cerrno>
-#include <iostream>
 #include <poll.h>
 #include <sstream>
 #include <utility>
 #include <unistd.h>
 
-#include "platform/wifi_backend.h"
 #include "platform/wpa_ctrl_client.h"
 
 namespace network_service {
@@ -74,8 +72,12 @@ static const char *failure_reason_for_event(const std::string &event) {
 
 } // namespace
 
-WpaEventMonitor::WpaEventMonitor(std::string iface, std::string ctrl_dir)
-    : iface_(std::move(iface)), ctrl_dir_(std::move(ctrl_dir)) {}
+WpaEventMonitor::WpaEventMonitor(std::string iface,
+                                 std::string ctrl_dir,
+                                 LinkStateHandler link_state_handler)
+    : iface_(std::move(iface)),
+      ctrl_dir_(std::move(ctrl_dir)),
+      link_state_handler_(std::move(link_state_handler)) {}
 
 WpaEventMonitor::~WpaEventMonitor() {
     stop();
@@ -136,7 +138,6 @@ void WpaEventMonitor::update_event(const std::string &event) {
         snapshot_.connected = false;
         snapshot_.disconnected = true;
         snapshot_.disconnect_events++;
-        snapshot_.dhcp_requested = false;
         snapshot_.has_ip = false;
         snapshot_.has_default_route = false;
         snapshot_.dns_available = false;
@@ -147,20 +148,6 @@ void WpaEventMonitor::update_event(const std::string &event) {
         snapshot_.disconnected = false;
         snapshot_.failure_reason = failure_reason_for_event(event);
     }
-}
-
-bool WpaEventMonitor::handle_connected_event() {
-    std::string error;
-    bool ok = wifi_start_dhcp(iface_, error);
-    std::lock_guard<std::mutex> guard(lock_);
-    snapshot_.dhcp_requests++;
-    snapshot_.dhcp_requested = ok;
-    snapshot_.wifi_state = ok ? "ip_configuring" : "failed";
-    if (!ok) {
-        snapshot_.failure_reason = "dhcp_start_failed";
-        snapshot_.last_event += " dhcp_error=" + error;
-    }
-    return ok;
 }
 
 void WpaEventMonitor::run() {
@@ -200,8 +187,12 @@ void WpaEventMonitor::run() {
             if (!ctrl.receive(event, error)) break;
             const std::string normalized = normalize_event(event);
             update_event(normalized);
+
+            if (!link_state_handler_) continue;
             if (normalized.find("CTRL-EVENT-CONNECTED") != std::string::npos) {
-                handle_connected_event();
+                link_state_handler_(true);
+            } else if (normalized.find("CTRL-EVENT-DISCONNECTED") != std::string::npos) {
+                link_state_handler_(false);
             }
         }
 
