@@ -96,6 +96,24 @@ std::string snapshot_payload(const NetworkSnapshot &snapshot) {
     return os.str();
 }
 
+std::string state_changes_payload(const NetworkStateChangeSet &changes) {
+    std::ostringstream os;
+    os << "{\"changed\":[";
+    bool first = true;
+    auto append = [&](const char *name, bool enabled) {
+        if (!enabled) return;
+        if (!first) os << ',';
+        os << '"' << name << '"';
+        first = false;
+    };
+    append("eth", changes.eth);
+    append("wifi", changes.wifi);
+    append("route", changes.route);
+    append("dns", changes.dns);
+    os << "]}";
+    return os.str();
+}
+
 std::string ping_payload(const PingInfo &info) {
     std::ostringstream os;
     os << "{\"service\":\"" << json_escape(info.service)
