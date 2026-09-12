@@ -62,6 +62,8 @@ private:
 
     struct StaticEthernetState {
         bool active = false;
+        std::string ip4;
+        std::string netmask4;
         std::string gateway4;
         std::string dns4;
         int manual_metric = 10;
@@ -75,6 +77,7 @@ private:
                                bool &changed,
                                std::string &error);
     bool apply_routes_locked(std::string &error);
+    bool repair_owned_state_locked(std::string &error);
     bool recompute_dns_locked(std::string &error);
     bool route_allowed(const std::string &iface) const;
     int route_metric(const std::string &iface, int manual_metric = -1) const;
