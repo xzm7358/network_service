@@ -55,11 +55,16 @@ int main() {
         out << "#!/bin/sh\nexit 0\n";
     }
 
+    ok = expect(!network_service::UdhcpcProcess::is_running(iface),
+                "unrelated PID must not satisfy udhcpc process truth") && ok;
+
     network_service::UdhcpcProcess::stop(iface);
 
     errno = 0;
     ok = expect(kill(getpid(), 0) == 0,
                 "stale PID ownership check killed an unrelated process") && ok;
+    ok = expect(!network_service::UdhcpcProcess::is_running(iface),
+                "stopped DHCP lifecycle must not report a running process") && ok;
     ok = expect(access(pidfile.c_str(), F_OK) != 0,
                 "stale pidfile should be removed") && ok;
     ok = expect(access(leasefile.c_str(), F_OK) != 0,
