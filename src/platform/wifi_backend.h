@@ -27,7 +27,6 @@ struct WifiSavedNetwork {
 
 bool wifi_set_enabled(const std::string &iface, bool enabled, std::string &error);
 bool wifi_disconnect(const std::string &iface, std::string &error);
-bool wifi_start_dhcp(const std::string &iface, std::string &error);
 bool wifi_connect(const std::string &iface,
                   const std::string &ssid,
                   const std::string &password,
