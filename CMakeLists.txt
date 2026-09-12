@@ -59,10 +59,11 @@ target_link_libraries(network_service_service
 )
 add_library(NetworkService::Service ALIAS network_service_service)
 
-# IPC: transport/session/codec/business-dispatch boundary. IPC depends on
-# Service; it has no direct dependency on Platform.
+# IPC: transport/session/codec/business-dispatch/representation boundary. IPC depends
+# on Service; it has no direct dependency on Platform beyond transitive typed data.
 add_library(network_service_ipc STATIC
     src/ipc/network_ipc_server.cpp
+    src/ipc/network_ipc_representation.cpp
     src/ipc/network_ipc_v1_business_dispatch.cpp
     src/ipc/network_ipc_v1_codec.cpp
     src/ipc/network_ipc_v1_event.cpp
