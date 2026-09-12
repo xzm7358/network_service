@@ -131,6 +131,15 @@ if(BUILD_TESTING)
     target_link_libraries(wifi_manager_test PRIVATE pthread)
     add_test(NAME wifi_manager COMMAND wifi_manager_test)
 
+    add_executable(udhcpc_process_test
+        tests/udhcpc_process_test.cpp
+        src/platform/udhcpc_process.cpp
+    )
+    target_include_directories(udhcpc_process_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME udhcpc_process COMMAND udhcpc_process_test)
+
     add_executable(wpa_ctrl_client_test
         tests/wpa_ctrl_client_test.cpp
         src/platform/wpa_ctrl_client.cpp
