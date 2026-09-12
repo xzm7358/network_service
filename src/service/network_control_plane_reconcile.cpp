@@ -17,6 +17,7 @@ bool NetworkControlPlane::adopt_dhcp(const std::string &iface, std::string &erro
     LinkState &state = link_for(iface);
     state = LinkState{};
     state.managed_dhcp = true;
+    owned_route_for(iface) = OwnedRouteState{};
     if (iface == eth_iface_) {
         // A verified running DHCP client is authoritative evidence that the
         // interface is not currently owned by our static-Ethernet lifecycle.
@@ -51,22 +52,22 @@ bool NetworkControlPlane::repair_owned_state_locked(std::string &error) {
         return ops_.apply_ipv4(iface, ip4, netmask4, error);
     };
 
-    auto repair_missing_route = [&](const std::string &iface,
-                                    const InterfaceSnapshot &observed,
-                                    const std::string &gateway4,
-                                    int metric) -> bool {
+    auto repair_route = [&](const std::string &iface,
+                            const InterfaceSnapshot &observed,
+                            const std::string &gateway4,
+                            int metric) -> bool {
         if (!observed.exists || !route_allowed(iface) || gateway4.empty()) return true;
-        if (observed.has_default_route) {
-            // Until route ownership identity is introduced, never replace a live
-            // route merely because its gateway/metric differs. It may belong to
-            // another manager. F-04 repairs only a route that disappeared.
+        OwnedRouteState &owned = owned_route_for(iface);
+        if (owned.active && owned.gateway4 == gateway4 && owned.metric == metric &&
+            observed.has_default_route && observed.gateway4 == gateway4 &&
+            observed.route_metric == metric) {
             return true;
         }
-        if (!ops_.set_default_route) {
-            error = "default-route repair port is unavailable";
-            return false;
-        }
-        return ops_.set_default_route(iface, gateway4, metric, error);
+
+        // Platform ensure-exact never deletes a different live route. This lets
+        // us repair/adopt our exact identity even when another manager has a
+        // separate route on the same interface.
+        return ensure_owned_route_locked(iface, gateway4, metric, error);
     };
 
     if (static_eth_.active) {
@@ -76,20 +77,20 @@ bool NetworkControlPlane::repair_owned_state_locked(std::string &error) {
                          static_eth_.netmask4)) {
             return false;
         }
-        if (!repair_missing_route(eth_iface_,
-                                  live.eth,
-                                  static_eth_.gateway4,
-                                  route_metric(eth_iface_, static_eth_.manual_metric))) {
+        if (!repair_route(eth_iface_,
+                          live.eth,
+                          static_eth_.gateway4,
+                          route_metric(eth_iface_, static_eth_.manual_metric))) {
             return false;
         }
     } else if (eth_.active && eth_.lease.configured()) {
         if (!repair_ipv4(eth_iface_, live.eth, eth_.lease.ip4, eth_.lease.netmask4)) {
             return false;
         }
-        if (!repair_missing_route(eth_iface_,
-                                  live.eth,
-                                  eth_.lease.gateway4,
-                                  route_metric(eth_iface_))) {
+        if (!repair_route(eth_iface_,
+                          live.eth,
+                          eth_.lease.gateway4,
+                          route_metric(eth_iface_))) {
             return false;
         }
     }
@@ -98,10 +99,10 @@ bool NetworkControlPlane::repair_owned_state_locked(std::string &error) {
         if (!repair_ipv4(wifi_iface_, live.wifi, wifi_.lease.ip4, wifi_.lease.netmask4)) {
             return false;
         }
-        if (!repair_missing_route(wifi_iface_,
-                                  live.wifi,
-                                  wifi_.lease.gateway4,
-                                  route_metric(wifi_iface_))) {
+        if (!repair_route(wifi_iface_,
+                          live.wifi,
+                          wifi_.lease.gateway4,
+                          route_metric(wifi_iface_))) {
             return false;
         }
     }
