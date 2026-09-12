@@ -8,9 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "config/ethernet_config.h"
+#include "network_service_contracts.h"
 #include "network_service_types.h"
-#include "platform/wifi_backend.h"
 #include "service/network_operation_result.h"
 #include "service/wifi_scan_lifecycle.h"
 #include "service/wpa_events_view.h"
