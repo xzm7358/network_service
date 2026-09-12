@@ -1,6 +1,7 @@
 #include "platform/udhcpc_process.h"
 
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
@@ -123,7 +124,7 @@ bool ensure_event_script(std::string &error) {
         error = "failed to flush udhcpc lease-event script";
         return false;
     }
-    if (chmod(tmp.c_str(), 0755) != 0 || rename(tmp.c_str(), path.c_str()) != 0) {
+    if (chmod(tmp.c_str(), 0755) != 0 || std::rename(tmp.c_str(), path.c_str()) != 0) {
         (void)unlink(tmp.c_str());
         error = "failed to publish udhcpc lease-event script";
         return false;
