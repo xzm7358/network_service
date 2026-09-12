@@ -25,6 +25,7 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/platform/interface_snapshot.cpp
     src/config/ethernet_config.cpp
     src/platform/ethernet_apply.cpp
+    src/platform/udhcpc_process.cpp
     src/platform/wifi_backend.cpp
     src/platform/wpa_ctrl_client.cpp
     src/platform/wpa_event_monitor.cpp
@@ -154,6 +155,7 @@ if(BUILD_TESTING)
         src/platform/interface_snapshot.cpp
         src/config/ethernet_config.cpp
         src/platform/ethernet_apply.cpp
+        src/platform/udhcpc_process.cpp
         src/platform/wifi_backend.cpp
         src/platform/wpa_ctrl_client.cpp
         src/platform/wpa_event_monitor.cpp
@@ -186,6 +188,7 @@ if(BUILD_TESTING)
         src/platform/interface_snapshot.cpp
         src/config/ethernet_config.cpp
         src/platform/ethernet_apply.cpp
+        src/platform/udhcpc_process.cpp
         src/platform/wifi_backend.cpp
         src/platform/wpa_ctrl_client.cpp
         src/platform/wpa_event_monitor.cpp
