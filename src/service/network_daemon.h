@@ -9,6 +9,7 @@
 
 namespace network_service {
 
+class WifiManager;
 class WpaEventMonitor;
 class WifiScanLifecycle;
 
@@ -50,6 +51,7 @@ private:
     std::string wifi_iface_;
     std::string config_dir_;
     SnapshotProvider snapshot_provider_;
+    std::unique_ptr<WifiManager> wifi_manager_;
     std::unique_ptr<WpaEventMonitor> wpa_monitor_;
     std::unique_ptr<WifiScanLifecycle> wifi_scan_lifecycle_;
 };
