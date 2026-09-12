@@ -34,7 +34,6 @@ void WifiManager::on_l2_connected() {
 
     std::string error;
     const bool started = dhcp_start_ && dhcp_start_(error);
-    bool stop_after_start = false;
     {
         std::lock_guard<std::mutex> guard(lock_);
         if (!started) {
@@ -46,16 +45,12 @@ void WifiManager::on_l2_connected() {
             return;
         }
 
-        // DISCONNECTED may have arrived while the blocking platform start was
-        // in progress. Do not publish a live DHCP lifecycle for a dead L2 link.
+        // If DISCONNECTED/explicit stop arrived while start was in progress,
+        // that cancelling transition already owns the serialized stop operation.
+        // Do not issue a second stop from the start path.
         if (!state_.l2_connected) {
             state_.dhcp_requested = false;
-            stop_after_start = true;
         }
-    }
-
-    if (stop_after_start && dhcp_stop_) {
-        dhcp_stop_();
     }
 }
 
