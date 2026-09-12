@@ -1,13 +1,16 @@
 #include "platform/udhcpc_process.h"
 
 #include <csignal>
-#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
+
+#include "platform/dhcp_lease_store.h"
 
 namespace network_service {
 namespace {
@@ -84,10 +87,58 @@ bool pid_matches_udhcpc_iface(int pid, const std::string &iface) {
 #endif
 }
 
+bool ensure_event_script(std::string &error) {
+    static std::mutex lock;
+    std::lock_guard<std::mutex> guard(lock);
+
+    const std::string path = UdhcpcProcess::event_script_path();
+    const std::string tmp = path + "." + std::to_string(getpid()) + ".tmp";
+    std::ofstream f(tmp, std::ios::out | std::ios::trunc);
+    if (!f) {
+        error = "failed to write udhcpc lease-event script";
+        return false;
+    }
+
+    f << "#!/bin/sh\n"
+      << "lease=\"/tmp/network_service_dhcp_${interface}.lease\"\n"
+      << "tmp=\"${lease}.$$\"\n"
+      << "write_fact() {\n"
+      << "  {\n"
+      << "    printf 'event=%s\\n' \"$1\"\n"
+      << "    printf 'ip=%s\\n' \"${ip:-}\"\n"
+      << "    printf 'subnet=%s\\n' \"${subnet:-}\"\n"
+      << "    printf 'router=%s\\n' \"${router:-}\"\n"
+      << "    printf 'dns=%s\\n' \"${dns:-}\"\n"
+      << "  } > \"$tmp\" || exit 1\n"
+      << "  mv -f \"$tmp\" \"$lease\" || exit 1\n"
+      << "}\n"
+      << "case \"$1\" in\n"
+      << "  deconfig) write_fact deconfig ;;\n"
+      << "  bound|renew) write_fact \"$1\" ;;\n"
+      << "esac\n"
+      << "exit 0\n";
+    f.close();
+    if (!f) {
+        (void)unlink(tmp.c_str());
+        error = "failed to flush udhcpc lease-event script";
+        return false;
+    }
+    if (chmod(tmp.c_str(), 0755) != 0 || rename(tmp.c_str(), path.c_str()) != 0) {
+        (void)unlink(tmp.c_str());
+        error = "failed to publish udhcpc lease-event script";
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 std::string UdhcpcProcess::pidfile_for(const std::string &iface) {
     return "/tmp/smart_hmi_udhcpc_" + iface + ".pid";
+}
+
+std::string UdhcpcProcess::event_script_path() {
+    return "/tmp/network_service_udhcpc_event.script";
 }
 
 void UdhcpcProcess::stop(const std::string &iface) {
@@ -102,27 +153,23 @@ void UdhcpcProcess::stop(const std::string &iface) {
         }
     }
     (void)unlink(pidfile.c_str());
+    DhcpLeaseStore::clear(iface);
 }
 
-bool UdhcpcProcess::start(const std::string &iface,
-                          const std::string &script_path,
-                          std::string &error) {
+bool UdhcpcProcess::start(const std::string &iface, std::string &error) {
     error.clear();
     if (!is_safe_iface(iface)) {
         error = "invalid DHCP iface";
         return false;
     }
-    if (script_path.empty()) {
-        error = "udhcpc script path is required";
-        return false;
-    }
+    if (!ensure_event_script(error)) return false;
 
     stop(iface);
 
     std::ostringstream os;
     os << "udhcpc -i " << iface
        << " -t 15 -n -p " << shell_quote(pidfile_for(iface))
-       << " -s " << shell_quote(script_path) << " &";
+       << " -s " << shell_quote(event_script_path()) << " &";
     return run_command(os.str(), error);
 }
 
