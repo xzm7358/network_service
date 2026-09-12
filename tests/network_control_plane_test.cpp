@@ -14,12 +14,14 @@ bool expect(bool condition, const char *message) {
     return false;
 }
 
+using RouteIdentity = std::tuple<std::string, std::string, int>;
+
 struct FakePlatform {
     std::map<std::string, network_service::DhcpLeaseFact> leases;
     std::vector<std::string> ip_applies;
     std::vector<std::string> ip_clears;
-    std::vector<std::tuple<std::string, std::string, int>> routes;
-    std::vector<std::string> route_clears;
+    std::vector<RouteIdentity> routes;
+    std::vector<RouteIdentity> route_clears;
     std::vector<std::string> dns_writes;
     int dns_clears = 0;
     network_service::NetworkSnapshot snapshot;
@@ -56,8 +58,12 @@ struct FakePlatform {
             routes.emplace_back(iface, gateway, metric);
             return true;
         };
-        out.clear_default_route = [this](const std::string &iface) {
-            route_clears.push_back(iface);
+        out.clear_default_route = [this](const std::string &iface,
+                                         const std::string &gateway,
+                                         int metric,
+                                         std::string &) {
+            route_clears.emplace_back(iface, gateway, metric);
+            return true;
         };
         out.set_dns = [this](const std::string &dns, std::string &) {
             dns_writes.push_back(dns);
@@ -100,6 +106,15 @@ network_service::DhcpLeaseFact lease(const std::string &iface,
     return out;
 }
 
+bool route_is(const RouteIdentity &route,
+              const char *iface,
+              const char *gateway,
+              int metric) {
+    return std::get<0>(route) == iface &&
+           std::get<1>(route) == gateway &&
+           std::get<2>(route) == metric;
+}
+
 } // namespace
 
 int main() {
@@ -122,12 +137,10 @@ int main() {
     ok = expect(fake.ip_applies.size() == 2, "both leases must configure IP") && ok;
     ok = expect(fake.routes.size() == 2, "both default routes must be installed") && ok;
     if (fake.routes.size() == 2) {
-        ok = expect(std::get<0>(fake.routes[0]) == "eth0" &&
-                    std::get<2>(fake.routes[0]) == 10,
-                    "EthernetPreferred must assign eth metric 10") && ok;
-        ok = expect(std::get<0>(fake.routes[1]) == "wlan0" &&
-                    std::get<2>(fake.routes[1]) == 20,
-                    "EthernetPreferred must assign wifi metric 20") && ok;
+        ok = expect(route_is(fake.routes[0], "eth0", "192.168.1.1", 10),
+                    "EthernetPreferred must own exact eth route metric 10") && ok;
+        ok = expect(route_is(fake.routes[1], "wlan0", "10.0.0.1", 20),
+                    "EthernetPreferred must own exact wifi route metric 20") && ok;
     }
     ok = expect(!fake.dns_writes.empty() && fake.dns_writes.back() == "1.1.1.1",
                 "EthernetPreferred DNS must follow Ethernet") && ok;
@@ -144,11 +157,19 @@ int main() {
     fake.reset_observations();
     ok = expect(plane.set_route_policy(RoutePolicy::WifiPreferred, error),
                 "WifiPreferred transition failed") && ok;
+    ok = expect(fake.route_clears.size() == 2,
+                "metric transition must withdraw both old owned route identities") && ok;
+    if (fake.route_clears.size() == 2) {
+        ok = expect(route_is(fake.route_clears[0], "eth0", "192.168.1.1", 10),
+                    "WifiPreferred must withdraw exact old Ethernet route") && ok;
+        ok = expect(route_is(fake.route_clears[1], "wlan0", "10.0.0.1", 20),
+                    "WifiPreferred must withdraw exact old Wi-Fi route") && ok;
+    }
     ok = expect(fake.routes.size() == 2, "WifiPreferred must reapply both routes") && ok;
     if (fake.routes.size() == 2) {
-        ok = expect(std::get<2>(fake.routes[0]) == 20,
+        ok = expect(route_is(fake.routes[0], "eth0", "192.168.1.1", 20),
                     "WifiPreferred must demote Ethernet") && ok;
-        ok = expect(std::get<2>(fake.routes[1]) == 10,
+        ok = expect(route_is(fake.routes[1], "wlan0", "10.0.0.1", 10),
                     "WifiPreferred must promote Wi-Fi") && ok;
     }
     ok = expect(!fake.dns_writes.empty() && fake.dns_writes.back() == "8.8.8.8",
@@ -157,10 +178,11 @@ int main() {
     fake.reset_observations();
     ok = expect(plane.set_route_policy(RoutePolicy::WifiOnly, error),
                 "WifiOnly transition failed") && ok;
-    ok = expect(!fake.route_clears.empty() && fake.route_clears.back() == "eth0",
-                "WifiOnly must remove managed Ethernet default route") && ok;
-    ok = expect(!fake.routes.empty() && std::get<0>(fake.routes.back()) == "wlan0" &&
-                std::get<2>(fake.routes.back()) == 10,
+    ok = expect(fake.route_clears.size() == 1 &&
+                route_is(fake.route_clears.back(), "eth0", "192.168.1.1", 20),
+                "WifiOnly must remove only the exact owned Ethernet route") && ok;
+    ok = expect(!fake.routes.empty() &&
+                route_is(fake.routes.back(), "wlan0", "10.0.0.1", 10),
                 "WifiOnly must keep Wi-Fi as primary route") && ok;
 
     FakePlatform failover;
@@ -179,8 +201,9 @@ int main() {
     failover.leases["eth0"] = deconfig;
     failover.reset_observations();
     ok = expect(failover_plane.reconcile(error), "eth deconfig reconcile failed") && ok;
-    ok = expect(!failover.route_clears.empty() && failover.route_clears.back() == "eth0",
-                "eth deconfig must remove only eth route") && ok;
+    ok = expect(failover.route_clears.size() == 1 &&
+                route_is(failover.route_clears.back(), "eth0", "192.168.1.1", 10),
+                "eth deconfig must remove exact owned eth route") && ok;
     ok = expect(!failover.dns_writes.empty() && failover.dns_writes.back() == "8.8.8.8",
                 "eth deconfig must fail DNS over to Wi-Fi") && ok;
 
@@ -196,9 +219,6 @@ int main() {
     ok = expect(protected_eth.dns_writes.empty(),
                 "unmanaged live Ethernet route must prevent Wi-Fi DNS overwrite") && ok;
 
-    // Start with Wi-Fi as the only route, then let an externally-managed
-    // Ethernet route recover. NetworkService must relinquish its DNS ownership
-    // instead of leaving Wi-Fi DNS sticky under EthernetPreferred.
     FakePlatform recovery;
     NetworkControlPlane recovery_plane("eth0", "wlan0", recovery.ops());
     ok = expect(recovery_plane.start_dhcp("wlan0", error), "recovery wifi start failed") && ok;
@@ -216,8 +236,6 @@ int main() {
     ok = expect(recovery.dns_writes.empty(),
                 "external Ethernet recovery must not install another managed DNS") && ok;
 
-    // Once the external owner has installed its own DNS, another reconcile must
-    // not clear or overwrite it.
     recovery.reset_observations();
     recovery.snapshot.dns4 = "4.4.4.4";
     recovery.snapshot.dns_available = true;
@@ -225,17 +243,12 @@ int main() {
     ok = expect(recovery.dns_clears == 0 && recovery.dns_writes.empty(),
                 "external DNS must remain untouched while Ethernet owns the route") && ok;
 
-    // If external Ethernet disappears again, Wi-Fi becomes primary and its DNS
-    // must be actively restored rather than skipped because of stale cache.
     recovery.reset_observations();
     recovery.snapshot.eth.has_default_route = false;
     ok = expect(recovery_plane.reconcile(error), "Wi-Fi DNS reacquire failed") && ok;
     ok = expect(!recovery.dns_writes.empty() && recovery.dns_writes.back() == "8.8.8.8",
                 "Wi-Fi DNS must be restored after external Ethernet disappears") && ok;
 
-    // Brownfield adoption must be non-mutating itself. Once imported, the normal
-    // reconciliation path consumes the already-existing lease and converges the
-    // owned IPv4/route/DNS state without starting a second DHCP lifecycle.
     FakePlatform adoption;
     adoption.leases["wlan0"] = lease("wlan0", "10.0.0.60", "10.0.0.1", "9.9.9.9");
     NetworkControlPlane adoption_plane("eth0", "wlan0", adoption.ops());
@@ -254,14 +267,11 @@ int main() {
                 adoption.ip_applies.back() == "wlan0=10.0.0.60",
                 "adopted lease did not converge IPv4") && ok;
     ok = expect(!adoption.routes.empty() &&
-                std::get<0>(adoption.routes.back()) == "wlan0",
-                "adopted lease did not converge default route") && ok;
+                route_is(adoption.routes.back(), "wlan0", "10.0.0.1", 20),
+                "adopted lease did not ensure/adopt exact default route") && ok;
     ok = expect(!adoption.dns_writes.empty() && adoption.dns_writes.back() == "9.9.9.9",
                 "adopted lease did not converge DNS") && ok;
 
-    // Netlink/external observation repair: once a lease is active, missing owned
-    // IP/default-route state must be restored even though the lease fingerprint
-    // itself has not changed.
     FakePlatform repair;
     NetworkControlPlane repair_plane("eth0", "wlan0", repair.ops());
     ok = expect(repair_plane.start_dhcp("wlan0", error), "repair wifi start failed") && ok;
@@ -289,9 +299,7 @@ int main() {
     ok = expect(repair_plane.refresh_external_state(error),
                 "missing-route repair failed") && ok;
     ok = expect(repair.routes.size() == 1 &&
-                std::get<0>(repair.routes.back()) == "wlan0" &&
-                std::get<1>(repair.routes.back()) == "10.0.0.1" &&
-                std::get<2>(repair.routes.back()) == 20,
+                route_is(repair.routes.back(), "wlan0", "10.0.0.1", 20),
                 "missing owned Wi-Fi default route was not restored") && ok;
 
     repair.snapshot.wifi.has_default_route = true;
@@ -307,8 +315,8 @@ int main() {
                 repair.ip_applies.back() == "wlan0=10.0.0.70",
                 "missing owned Wi-Fi IPv4 was not restored") && ok;
 
-    // Until route identity is implemented, a different live route on the same
-    // interface is preserved rather than destructively replaced.
+    // A foreign route can coexist. Service asks Platform to ensure only its exact
+    // identity and never clears the different live route.
     repair.snapshot.wifi.has_ip = true;
     repair.snapshot.wifi.ip4 = "10.0.0.70";
     repair.snapshot.wifi.netmask4 = "255.255.255.0";
@@ -317,12 +325,13 @@ int main() {
     repair.snapshot.wifi.route_metric = 99;
     repair.reset_observations();
     ok = expect(repair_plane.refresh_external_state(error),
-                "foreign-route preservation refresh failed") && ok;
-    ok = expect(repair.routes.empty() && repair.route_clears.empty(),
-                "F-04 must not replace/delete a different live route") && ok;
+                "foreign-route coexistence refresh failed") && ok;
+    ok = expect(repair.routes.size() == 1 &&
+                route_is(repair.routes.back(), "wlan0", "10.0.0.1", 20),
+                "foreign route must not prevent ensuring our exact route") && ok;
+    ok = expect(repair.route_clears.empty(),
+                "foreign route must never be blindly cleared") && ok;
 
-    // DELLINK/driver disappearance is not a Service repair target. Avoid a 250ms
-    // mutation loop against an interface that no longer exists.
     repair.snapshot.wifi.exists = false;
     repair.snapshot.wifi.has_ip = false;
     repair.snapshot.wifi.has_default_route = false;
@@ -332,8 +341,6 @@ int main() {
     ok = expect(repair.ip_applies.empty() && repair.routes.empty(),
                 "missing interface must not trigger owned-state mutation") && ok;
 
-    // Static Ethernet owns an IPv4 desired fact too; preserve enough desired
-    // state to restore an externally removed address.
     FakePlatform static_repair;
     NetworkControlPlane static_plane("eth0", "wlan0", static_repair.ops());
     ok = expect(static_plane.apply_ethernet_static("192.168.50.20",
@@ -357,6 +364,15 @@ int main() {
     ok = expect(static_repair.ip_applies.size() == 1 &&
                 static_repair.ip_applies.back() == "eth0=192.168.50.20",
                 "missing owned static IPv4 was not restored") && ok;
+
+    static_repair.reset_observations();
+    static_plane.stop_dhcp("eth0");
+    ok = expect(static_repair.route_clears.size() == 1 &&
+                route_is(static_repair.route_clears.back(),
+                         "eth0",
+                         "192.168.50.1",
+                         10),
+                "stop must withdraw only the exact owned static route") && ok;
 
     return ok ? 0 : 1;
 }
