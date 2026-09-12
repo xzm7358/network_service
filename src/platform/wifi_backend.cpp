@@ -2,10 +2,8 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
 #include <sstream>
 #include <string>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include "platform/udhcpc_process.h"
@@ -94,45 +92,6 @@ static std::vector<std::string> split_tab_line(const std::string &line) {
         start = tab + 1;
     }
     return fields;
-}
-
-static std::string dhcp_script_path() {
-    return "/tmp/smart_hmi_udhcpc_wifi_network_service.script";
-}
-
-static bool ensure_dhcp_script(std::string &error) {
-    const std::string path = dhcp_script_path();
-    std::ofstream f(path, std::ios::out | std::ios::trunc);
-    if (!f) {
-        error = "failed to write Wi-Fi udhcpc script";
-        return false;
-    }
-    f << "#!/bin/sh\n"
-      << "case \"$1\" in\n"
-      << "  deconfig)\n"
-      << "    ifconfig \"$interface\" 0.0.0.0 2>/dev/null\n"
-      << "    ;;\n"
-      << "  bound|renew)\n"
-      << "    ifconfig \"$interface\" \"$ip\" netmask \"$subnet\" up\n"
-      << "    if [ -n \"$router\" ]; then\n"
-      << "      route del default dev \"$interface\" 2>/dev/null\n"
-      << "      for r in $router; do route add default gw \"$r\" dev \"$interface\" metric 20 2>/dev/null; break; done\n"
-      << "    fi\n"
-      << "    if [ -n \"$dns\" ]; then\n"
-      << "      : > /etc/resolv.conf\n"
-      << "      for d in $dns; do echo nameserver \"$d\" >> /etc/resolv.conf; done\n"
-      << "    fi\n"
-      << "    ;;\n"
-      << "esac\n"
-      << "exit 0\n";
-    f.close();
-    chmod(path.c_str(), 0755);
-    return true;
-}
-
-static bool start_wifi_dhcp(const std::string &iface, std::string &error) {
-    if (!ensure_dhcp_script(error)) return false;
-    return UdhcpcProcess::start(iface, dhcp_script_path(), error);
 }
 
 static bool wpa_request(const std::string &iface,
@@ -236,7 +195,7 @@ bool wifi_start_dhcp(const std::string &iface, std::string &error) {
         error = "invalid wifi iface";
         return false;
     }
-    return start_wifi_dhcp(iface, error);
+    return UdhcpcProcess::start(iface, error);
 }
 
 bool wifi_set_enabled(const std::string &iface, bool enabled, std::string &error) {
@@ -262,8 +221,6 @@ bool wifi_disconnect(const std::string &iface, std::string &error) {
     }
     std::string ignored;
     (void)wpa_ok(iface, "DISCONNECT", ignored);
-    (void)system(("route del default dev " + iface + " 2>/dev/null").c_str());
-    (void)system(("ifconfig " + iface + " 0.0.0.0 2>/dev/null").c_str());
     error.clear();
     return true;
 }
