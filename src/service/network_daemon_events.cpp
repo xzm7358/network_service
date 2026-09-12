@@ -15,6 +15,10 @@ bool NetworkDaemon::reconcile(bool &changed, std::string &error) {
 }
 
 bool NetworkDaemon::consume_runtime_state_dirty() {
+    // Deterministic injected snapshots and production systems without a usable
+    // Netlink source retain the legacy 250 ms state-observation fallback.
+    if (snapshot_provider_ || !netlink_monitor_) return true;
+
     if (!wpa_monitor_) return false;
     const std::uint64_t current = wpa_monitor_->snapshot().event_sequence;
     const std::uint64_t previous = last_wpa_event_sequence_.exchange(current);
