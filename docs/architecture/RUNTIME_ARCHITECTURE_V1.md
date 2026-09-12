@@ -1,8 +1,10 @@
 # NetworkService Runtime Architecture V1
 
-## Goal
+## Status
 
-Keep the runtime small enough for the 64 MB embedded Linux target while preserving strict ownership and dependency direction.
+**Landed baseline.** Runtime migration Phases 1-6 are complete on `main`.
+
+The design target is a small, explicit network control plane suitable for a 64 MB embedded Linux device. The implementation deliberately reuses `wpa_supplicant` and BusyBox `udhcpc` while keeping product lifecycle, route/DNS policy, truth normalization and IPC ownership inside NetworkService.
 
 ## Frozen dependency direction
 
@@ -36,107 +38,237 @@ Platform Mechanism
 
 Reverse dependencies are forbidden.
 
-## Boundary rules
-
-1. IPC owns transport, framing, sessions, request/response encoding and event fan-out. IPC must not invoke `wpa_supplicant`, `udhcpc`, `ifconfig`, route mutation or DNS mutation directly.
-2. Service/Policy owns orchestration and lifecycle decisions. It consumes typed facts from platform mechanisms and decides what operation should happen next.
-3. Platform owns Linux and daemon mechanisms only. Platform code must not decide product policy such as retry count, preferred interface, route priority or UI-visible state.
-4. WPA control is a Layer-2 mechanism. A `CTRL-EVENT-CONNECTED` event is an L2 fact, not proof of DHCP success or network readiness.
-5. DHCP process ownership is singular: Wi-Fi and Ethernet share `UdhcpcProcess`; Wi-Fi L2-to-DHCP lifecycle decisions belong to `WifiManager`.
-6. Route and DNS policy must not live in the udhcpc callback script. DHCP reports typed lease facts; `NetworkControlPlane` decides IP/route/DNS application through platform ports.
-7. Network truth must keep L2, IP, route and DNS facts distinct. Do not define Wi-Fi connection truth as `has_ip`.
-8. The runtime should prefer the existing bounded `poll()` reactor over adding a more complex event framework while the active FD count remains small.
-
-## Current runtime boundary
+The same direction is now encoded in CMake:
 
 ```text
-WpaEventMonitor
-      |
-      | L2 facts
-      v
-  WifiManager -----------------------+
-      |                               |
-      | start/stop DHCP decision      |
-      v                               |
-NetworkControlPlane <----------------+
-      |
-      +--> UdhcpcProcess
-      |       |
-      |       v
-      |   Lease Fact files
-      |       |
-      |<------+   (reconciled by existing 250 ms reactor cadence)
-      |
-      +--> NetworkConfigurator
-              +--> IPv4 mechanism
-              +--> default-route mechanism
-              +--> DNS mechanism
+NetworkService::IPC
+        |
+        v
+NetworkService::Service
+        |
+        v
+NetworkService::Platform
 ```
 
-The udhcpc callback performs lease delivery only. It atomically publishes interface-scoped `bound`, `renew`, or `deconfig` facts and does not configure IP, route, or DNS itself.
+The final `network_service` executable contains the composition entry point and links the IPC target; it no longer recompiles one flat runtime source list.
 
-## Minimal target module boundary
+## Ownership rules
+
+1. **IPC** owns Unix-domain transport, framing, sessions, request/response encoding, event sequencing, backpressure and fan-out. IPC must not invoke `wpa_supplicant`, `udhcpc`, `ifconfig`, route mutation or DNS mutation directly.
+2. **Service / Policy** owns orchestration, lifecycle decisions, route/DNS policy and normalized network truth. It consumes facts from Platform and decides what operation happens next.
+3. **Platform** owns Linux/daemon/persistence mechanisms only. Platform does not decide retry policy, preferred interface, UI state or product route/DNS policy.
+4. `CTRL-EVENT-CONNECTED` is an **L2 fact**. It is not DHCP success and is not network readiness.
+5. DHCP process ownership is singular. Wi-Fi and Ethernet share `UdhcpcProcess`; Wi-Fi L2-to-DHCP lifecycle decisions belong to `WifiManager`.
+6. The udhcpc callback is a **Lease Fact producer only**. It must not configure route or DNS policy.
+7. Network truth keeps **L2, IP, default route and DNS facts separate**. Wi-Fi connection truth must never be inferred as `connected == has_ip`.
+8. The runtime keeps the existing bounded `poll()` reactor. The current FD count does not justify adding epoll or a larger event framework.
+9. Read-only snapshot/status APIs must remain free of network mutation side effects.
+10. External/brownfield network ownership must not be silently overwritten; NetworkService only clears DNS that it can prove it owns.
+
+## Current runtime flow
+
+### Wi-Fi and DHCP lifecycle
+
+```text
+wpa_supplicant
+      |
+      | control-socket events
+      v
+WpaEventMonitor
+      |
+      | typed L2 fact
+      v
+  WifiManager
+      |
+      | start / stop DHCP policy
+      v
+NetworkControlPlane
+      |
+      v
+ UdhcpcProcess
+      |
+      | bound / renew / deconfig
+      v
+DhcpLeaseStore
+      |
+      | typed Lease Fact
+      v
+NetworkControlPlane
+```
+
+`UdhcpcProcess` generation-fences every DHCP lifecycle. Late callback events from a stopped client cannot overwrite facts belonging to a newer DHCP generation.
+
+### IP / Route / DNS application
+
+```text
+DhcpLeaseStore / static config
+             |
+             v
+     NetworkControlPlane
+       |       |       |
+       v       v       v
+     IPv4    Route    DNS policy
+       \       |       /
+        \      |      /
+         v     v     v
+       NetworkConfigurator
+              |
+              v
+        Linux mechanisms
+```
+
+Default production route policy remains `EthernetPreferred`:
+
+- managed Ethernet default route metric: 10;
+- managed Wi-Fi default route metric: 20;
+- Wi-Fi DNS is selected only when policy permits it;
+- externally managed Ethernet ownership is preserved during brownfield adoption;
+- `WifiPreferred` and `WifiOnly` remain tested internal policy capabilities and are not exposed as a new public IPC mutation in this baseline.
+
+### Network truth
+
+Raw Platform observation does not derive product state.
+
+```text
+WPA L2 facts ---------+
+                      |
+Kernel IP facts ------+--> NetworkState normalization --> authoritative truth
+                      |
+Kernel route facts ---+
+                      |
+DNS facts ------------+
+```
+
+The normalized model distinguishes:
+
+- `WifiL2State`;
+- `IpState`;
+- default-route truth;
+- DNS truth;
+- `network_ready`.
+
+Legacy `connected` and `online` fields remain compatibility projections for existing IPC consumers. `online` is **not** claimed to be Internet reachability.
+
+## Event model and reconciliation
+
+Healthy Linux production targets use an event-driven kernel truth path:
+
+```text
+Netlink
+  |  RTMGRP_LINK
+  |  RTMGRP_IPV4_IFADDR
+  |  RTMGRP_IPV4_ROUTE
+  v
+NetworkDaemon Service facade
+  v
+existing IPC poll() reactor
+  v
+immediate authoritative snapshot + semantic diff
+  v
+network.state.changed
+```
+
+The reactor uses three complementary paths:
+
+1. **Netlink immediate path** — link, IPv4 address and default-route changes trigger immediate state observation.
+2. **250 ms fast path** — consumes DHCP Lease Fact changes and WPA event-sequence dirtiness without unconditionally reading a full snapshot when Netlink is healthy.
+3. **30 s authoritative fallback** — catches dropped Netlink notifications and external DNS-only changes that have no Netlink signal.
+
+If Netlink cannot be opened or later becomes unusable, production automatically restores the pre-Netlink **250 ms full reconciliation/state-observation fallback** rather than silently accepting slower recovery. Deterministic test fixtures with injected snapshots also keep the 250 ms observation path and do not attach to the host Netlink stream.
+
+## Module layout
 
 ```text
 src/
 ├── main.cpp
+├── ipc/
+│   ├── network_ipc_server.*
+│   └── network_ipc_v1_*.cpp
 ├── service/
 │   ├── network_control_plane.*
+│   ├── network_daemon.*
+│   ├── network_daemon_events.cpp
+│   ├── network_state.*
+│   ├── network_state_change_detector.*
 │   ├── wifi_manager.*
-│   └── network_state.*        # Phase 4 target
+│   └── wifi_scan_lifecycle.*
 ├── platform/
 │   ├── wpa_ctrl_client.*
+│   ├── wpa_event_monitor.*
 │   ├── udhcpc_process.*
 │   ├── dhcp_lease_store.*
 │   ├── network_configurator.*
-│   └── netlink_monitor.*      # Phase 5 target
-├── ipc/
-│   ├── network_ipc_server.*
-│   └── ipc_v1/...
+│   ├── interface_snapshot.*
+│   ├── netlink_monitor.*
+│   └── wifi_backend.*
 └── config/
-    └── network_config.*
+    └── ethernet_config.*
 ```
 
-This is a target shape, not a requirement to create empty abstraction classes. New types are introduced only when they establish ownership, remove duplication or create a useful test seam.
+New abstractions are added only when they establish ownership, remove duplication, enforce a boundary or create a meaningful test seam.
 
-## Migration status
+## Migration record
 
-### Phase 1 - Supplicant control convergence — complete
+### Phase 1 — Supplicant control convergence — complete
 
-- `wpa_cli`/`popen` were removed from the Wi-Fi control path.
-- Command and event control-socket mechanics are behind `WpaCtrlClient`.
-- External IPC behavior stayed stable.
+- removed `wpa_cli` / `popen` from Wi-Fi control;
+- unified command/event control-socket mechanics behind `WpaCtrlClient`;
+- preserved external IPC behavior.
 
-### Phase 2 - DHCP ownership — complete
+### Phase 2 — DHCP ownership — complete
 
-- `UdhcpcProcess` is the shared Wi-Fi/Ethernet DHCP lifecycle mechanism.
-- `WpaEventMonitor` publishes L2 facts only.
-- `WifiManager` owns L2-to-DHCP lifecycle decisions and duplicate/concurrent CONNECTED suppression.
-- stale PID identity is verified before SIGTERM.
+- introduced shared `UdhcpcProcess` lifecycle ownership;
+- moved L2-to-DHCP policy into `WifiManager`;
+- removed DHCP responsibility from WPA event parsing;
+- added duplicate/concurrent start, stale PID and disconnect/reconnect regression coverage.
 
-### Phase 3 - Route/DNS ownership — active
+### Phase 3 — Route/DNS ownership — complete
 
-- udhcpc callback responsibility is reduced to atomic Lease Fact delivery.
-- `DhcpLeaseStore` parses typed lease facts.
-- `NetworkControlPlane` owns DHCP lease reconciliation, route priority and DNS selection.
-- `NetworkConfigurator` contains the Linux mutation mechanisms only.
-- the existing 250 ms reactor cadence performs reconciliation before observing/broadcasting the authoritative snapshot; no new worker thread is added.
-- default production policy remains `EthernetPreferred`; `WifiPreferred` and `WifiOnly` are internal/tested policy capabilities and are not exposed through new IPC in this phase.
+- reduced udhcpc callback responsibility to atomic Lease Fact publication;
+- added typed `DhcpLeaseStore` facts and generation fencing;
+- moved route/DNS policy to `NetworkControlPlane`;
+- moved Linux mutation mechanics to `NetworkConfigurator`;
+- protected external Ethernet/DNS ownership.
 
-### Phase 4 - Truth model — next
+### Phase 4 — Truth model — complete
 
-- Separate Wi-Fi L2 state, IP state, default-route state and DNS state.
-- Remove ambiguous `connected == has_ip` semantics.
-- Remove reconciliation/overlay code that exists only because two models currently claim the same truth.
+- introduced typed L2/IP truth;
+- removed Platform `connected == has_ip` and `online` derivation;
+- made Service normalization the single authoritative truth projection;
+- separated scan lifecycle from L2 connection truth;
+- fixed WifiManager callback/mutex lock-order hazards.
 
-### Phase 5 - Netlink event path
+### Phase 5 — Netlink event path — complete
 
-- Add link/address/route observation through Netlink.
-- Replace the 250 ms snapshot polling path where event truth is available.
-- Keep a low-frequency reconciliation path as a guard against missed events.
+- added nonblocking link/address/default-route Netlink observation;
+- integrated the event FD into the existing `poll()` reactor without a new thread;
+- replaced unconditional 250 ms full snapshots with event-driven observation when Netlink is healthy;
+- retained deterministic and production fallback paths.
 
-## Current supplicant deviation
+### Phase 6 — Build-graph boundary enforcement — complete
 
-The repository does not currently carry an SDK-provided `wpa_ctrl.h`/`libwpa_client` build dependency. The runtime therefore uses a small `WpaCtrlClient` platform adapter that speaks the same wpa_supplicant control-socket protocol and removes `wpa_cli`/`popen` from the runtime path.
+- introduced `NetworkService::Platform`, `NetworkService::Service` and `NetworkService::IPC` CMake targets;
+- encoded the allowed dependency direction in `target_link_libraries`;
+- replaced raw `pthread` linkage with `Threads::Threads`;
+- moved C++17/version/include configuration to target-scoped usage requirements;
+- removed repeated full-runtime source lists from executable, integration test and E2E fixture builds.
 
-The adapter boundary is intentionally narrow so a later target SDK integration can replace its implementation with the official `wpa_ctrl` API without changing Service/Policy callers.
+## Supplicant adapter deviation
+
+The repository still does not carry an SDK-provided `wpa_ctrl.h` / `libwpa_client` build dependency. The runtime therefore uses a small `WpaCtrlClient` Platform adapter that speaks the wpa_supplicant control-socket protocol directly.
+
+The adapter boundary is deliberately narrow. If the target SDK later provides the official `wpa_ctrl` client library, only the Platform adapter implementation should change; Service and IPC must remain untouched.
+
+## Validation gates
+
+Architecture changes are expected to keep all of the following green:
+
+- Governance / architecture-boundary verification;
+- strict host build with `-Wall -Wextra -Wpedantic -Werror`;
+- CTest unit/integration suite;
+- IPC v0/v1 coexistence and full v1 contract gates;
+- EVENT sequencing and reconnect/rebase regression;
+- bounded outbound backpressure and long-lived client lifecycle regression;
+- clang static analysis;
+- ASan/UBSan;
+- target RC evidence flow for SSD20x.
