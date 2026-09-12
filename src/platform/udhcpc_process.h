@@ -11,7 +11,8 @@ public:
     static void stop(const std::string &iface);
 
     static std::string pidfile_for(const std::string &iface);
-    static std::string event_script_path();
+    static std::string event_script_path(const std::string &iface,
+                                         const std::string &generation);
 };
 
 } // namespace network_service
