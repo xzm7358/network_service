@@ -42,6 +42,16 @@ enum class IpState {
     Ready,
 };
 
+// Service-owned DHCP client lifecycle truth. This is deliberately independent
+// from lease/IP truth: a client can exit after configuring an address, and a
+// running client does not imply that an address has been acquired yet.
+enum class DhcpClientState {
+    Idle = 0,
+    Starting,
+    Running,
+    Failed,
+};
+
 struct InterfaceSnapshot {
     std::string iface;
     bool exists = false;
