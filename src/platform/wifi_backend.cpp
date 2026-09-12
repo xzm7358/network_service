@@ -6,7 +6,6 @@
 #include <string>
 #include <unistd.h>
 
-#include "platform/udhcpc_process.h"
 #include "platform/wpa_ctrl_client.h"
 
 namespace network_service {
@@ -189,14 +188,6 @@ static int find_saved_network_id(const std::string &iface, const std::string &ss
 }
 
 } // namespace
-
-bool wifi_start_dhcp(const std::string &iface, std::string &error) {
-    if (!is_safe_iface(iface)) {
-        error = "invalid wifi iface";
-        return false;
-    }
-    return UdhcpcProcess::start(iface, error);
-}
 
 bool wifi_set_enabled(const std::string &iface, bool enabled, std::string &error) {
     if (!is_safe_iface(iface)) {
