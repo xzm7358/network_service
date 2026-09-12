@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+CPP_SUFFIXES = {".cpp", ".cc", ".c", ".h", ".hpp"}
 MECHANISMS = [
     r"\bwpa_cli\b",
     r"\budhcpc\b",
@@ -34,11 +35,20 @@ WIFI_PLATFORM_POLICY_FORBIDDEN = [
     r"\bwifi_forget_saved\s*\(",
     r"\bwifi_set_autoconnect\s*\(",
 ]
+INCLUDE_RX = re.compile(r'^\s*#\s*include\s*[<"]([^">]+)[">]')
+BROAD_SRC_CMAKE_RX = re.compile(
+    r"\$<BUILD_INTERFACE:\$\{CMAKE_CURRENT_SOURCE_DIR\}/src>"
+)
+BROAD_SRC_CI_RX = re.compile(r"(^|\s)-Isrc(?=\s|[\"'])")
+
 DIAG = "PRODUCT_ARCHITECTURE_MECHANISM_LEAK"
 DHCP_DIAG = "PRODUCT_DHCP_CALLBACK_POLICY_LEAK"
 TRUTH_DIAG = "PRODUCT_PLATFORM_TRUTH_DERIVATION_LEAK"
 REPRESENTATION_DIAG = "PRODUCT_REPRESENTATION_BOUNDARY_LEAK"
 WIFI_POLICY_DIAG = "PRODUCT_WIFI_PLATFORM_POLICY_LEAK"
+INCLUDE_DIAG = "PRODUCT_INCLUDE_DEPENDENCY_DIRECTION_LEAK"
+HEADER_LAYOUT_DIAG = "PRODUCT_LAYER_HEADER_LAYOUT_LEAK"
+BROAD_INCLUDE_DIAG = "PRODUCT_BROAD_SRC_INCLUDE_ROOT_LEAK"
 
 
 def scan_text(path: Path, text: str, patterns=MECHANISMS):
@@ -51,15 +61,36 @@ def scan_text(path: Path, text: str, patterns=MECHANISMS):
     return findings
 
 
+def scan_include_text(path: Path, text: str, forbidden_layers):
+    findings = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        match = INCLUDE_RX.match(line)
+        if not match:
+            continue
+        target = match.group(1).replace("\\", "/")
+        parts = {part for part in target.split("/") if part not in {"", ".", ".."}}
+        forbidden = sorted(parts.intersection(forbidden_layers))
+        if forbidden:
+            findings.append(
+                (path, lineno, ",".join(forbidden), line.strip())
+            )
+    return findings
+
+
+def iter_cpp_files(base: Path):
+    if not base.exists():
+        return
+    for path in base.rglob("*"):
+        if path.suffix in CPP_SUFFIXES:
+            yield path
+
+
 def scan(root=ROOT):
     findings = []
     for base in [root / "src/service", root / "src/ipc"]:
-        if not base.exists():
-            continue
-        for path in base.rglob("*"):
-            if path.suffix in {".cpp", ".cc", ".c", ".h", ".hpp"}:
-                for finding in scan_text(path, path.read_text(errors="replace")):
-                    findings.append((DIAG, *finding))
+        for path in iter_cpp_files(base):
+            for finding in scan_text(path, path.read_text(errors="replace")):
+                findings.append((DIAG, *finding))
 
     callback = root / "src/platform/udhcpc_process.cpp"
     if callback.exists():
@@ -80,19 +111,18 @@ def scan(root=ROOT):
             findings.append((TRUTH_DIAG, *finding))
 
     for base in [root / "src/service", root / "src/platform", root / "src/config"]:
-        if not base.exists():
-            continue
-        for path in base.rglob("*"):
-            if path.suffix in {".cpp", ".cc", ".c", ".h", ".hpp"}:
-                for finding in scan_text(
-                    path,
-                    path.read_text(errors="replace"),
-                    REPRESENTATION_FORBIDDEN,
-                ):
-                    findings.append((REPRESENTATION_DIAG, *finding))
+        for path in iter_cpp_files(base):
+            for finding in scan_text(
+                path,
+                path.read_text(errors="replace"),
+                REPRESENTATION_FORBIDDEN,
+            ):
+                findings.append((REPRESENTATION_DIAG, *finding))
 
-    for name in ["wifi_backend.h", "wifi_backend.cpp"]:
-        path = root / "src/platform" / name
+    for path in [
+        root / "src/platform/include/platform/wifi_backend.h",
+        root / "src/platform/wifi_backend.cpp",
+    ]:
         if not path.exists():
             continue
         for finding in scan_text(
@@ -101,6 +131,65 @@ def scan(root=ROOT):
             WIFI_PLATFORM_POLICY_FORBIDDEN,
         ):
             findings.append((WIFI_POLICY_DIAG, *finding))
+
+    # Include direction: lower layers must never reach upward, even through
+    # relative-path includes that could bypass target include search paths.
+    include_rules = [
+        (root / "src/platform", {"service", "ipc"}),
+        (root / "src/config", {"service", "ipc"}),
+        (root / "src/service", {"ipc"}),
+        (root / "include", {"platform", "config", "service", "ipc"}),
+    ]
+    for base, forbidden_layers in include_rules:
+        for path in iter_cpp_files(base):
+            for finding in scan_include_text(
+                path,
+                path.read_text(errors="replace"),
+                forbidden_layers,
+            ):
+                findings.append((INCLUDE_DIAG, *finding))
+
+    # Internal headers must live behind a namespaced layer include root. A new
+    # header dropped directly beside implementation files would not participate
+    # in the physical CMake boundary and is therefore rejected.
+    for base in [
+        root / "src/platform",
+        root / "src/config",
+        root / "src/service",
+        root / "src/ipc",
+    ]:
+        if not base.exists():
+            continue
+        for suffix in ("*.h", "*.hpp"):
+            for path in base.glob(suffix):
+                findings.append(
+                    (
+                        HEADER_LAYOUT_DIAG,
+                        path,
+                        1,
+                        "layer-header-layout",
+                        "internal header must live under <layer>/include/<namespace>/",
+                    )
+                )
+
+    cmake = root / "CMakeLists.txt"
+    if cmake.exists():
+        for finding in scan_text(
+            cmake,
+            cmake.read_text(errors="replace"),
+            [BROAD_SRC_CMAKE_RX.pattern],
+        ):
+            findings.append((BROAD_INCLUDE_DIAG, *finding))
+
+    workflow = root / ".github/workflows/eep-ci.yml"
+    if workflow.exists():
+        for finding in scan_text(
+            workflow,
+            workflow.read_text(errors="replace"),
+            [BROAD_SRC_CI_RX.pattern],
+        ):
+            findings.append((BROAD_INCLUDE_DIAG, *finding))
+
     return findings
 
 
@@ -177,6 +266,35 @@ def self_test():
         'return wpa_ok(iface, "SAVE_CONFIG", error);',
         WIFI_PLATFORM_POLICY_FORBIDDEN,
     )
+
+    assert scan_include_text(
+        Path("platform.cpp"),
+        '#include "service/network_daemon.h"',
+        {"service", "ipc"},
+    )
+    assert scan_include_text(
+        Path("platform.cpp"),
+        '#include "../service/include/service/network_daemon.h"',
+        {"service", "ipc"},
+    )
+    assert not scan_include_text(
+        Path("service.cpp"),
+        '#include "platform/wifi_backend.h"',
+        {"ipc"},
+    )
+    assert scan_include_text(
+        Path("service.cpp"),
+        '#include "ipc/network_ipc_server.h"',
+        {"ipc"},
+    )
+    assert not BROAD_SRC_CMAKE_RX.search(
+        '$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/platform/include>'
+    )
+    assert BROAD_SRC_CMAKE_RX.search(
+        '$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>'
+    )
+    assert not BROAD_SRC_CI_RX.search('clang++ -Isrc/platform/include foo.cpp')
+    assert BROAD_SRC_CI_RX.search('clang++ -Iinclude -Isrc "${f}"')
 
 
 def main():

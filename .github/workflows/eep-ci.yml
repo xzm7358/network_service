@@ -170,7 +170,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          public=(-Iinclude)
+          platform=(-Isrc/platform/include -Isrc/config/include)
+          service=(-Isrc/service/include)
+          ipc=(-Isrc/ipc/include)
+
           while IFS= read -r f; do
-            clang++ --analyze -std=c++17 -Iinclude -Isrc "$f"
+            case "$f" in
+              src/platform/*|src/config/*)
+                clang++ --analyze -std=c++17 "${public[@]}" "${platform[@]}" "$f"
+                ;;
+              src/service/*)
+                clang++ --analyze -std=c++17 "${public[@]}" "${platform[@]}" "${service[@]}" "$f"
+                ;;
+              src/ipc/*|src/main.cpp)
+                clang++ --analyze -std=c++17 "${public[@]}" "${platform[@]}" "${service[@]}" "${ipc[@]}" "$f"
+                ;;
+              *)
+                echo "unexpected translation unit: $f" >&2
+                exit 1
+                ;;
+            esac
           done < <(find src -type f -name '*.cpp' | sort)
-          clang++ --analyze -std=c++17 -Iinclude -Isrc tools/rc/network_service_rc_probe.cpp
+
+          clang++ --analyze -std=c++17 \
+            "${public[@]}" "${platform[@]}" "${service[@]}" "${ipc[@]}" \
+            tools/rc/network_service_rc_probe.cpp

@@ -8,20 +8,19 @@ option(NETWORK_SERVICE_BUILD_RC_PROBE
 
 find_package(Threads REQUIRED)
 
-# Shared compile contract for all runtime layers. The source tree headers are
-# intentionally visible between internal module targets; dependency direction is
-# enforced by target_link_libraries below rather than by one flat source list.
+# Shared compile contract only. Internal source-tree headers are deliberately not
+# exposed here: every runtime layer publishes only its own namespaced include root.
 add_library(network_service_build_config INTERFACE)
 target_compile_features(network_service_build_config INTERFACE cxx_std_17)
 target_include_directories(network_service_build_config INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 target_compile_definitions(network_service_build_config INTERFACE
     NETWORK_SERVICE_VERSION=\"${PROJECT_VERSION}\"
 )
 
-# Platform Mechanism: Linux/daemon/persistence mechanics only.
+# Platform Mechanism: Linux/daemon/persistence mechanics only. Platform can see
+# public contracts plus Platform/Config headers, but not Service or IPC headers.
 add_library(network_service_platform STATIC
     src/platform/dhcp_lease_store.cpp
     src/platform/interface_snapshot.cpp
@@ -33,6 +32,11 @@ add_library(network_service_platform STATIC
     src/platform/wpa_ctrl_client.cpp
     src/platform/wpa_event_monitor.cpp
 )
+target_include_directories(network_service_platform
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/platform/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/config/include>
+)
 target_link_libraries(network_service_platform
     PUBLIC
         network_service_build_config
@@ -40,8 +44,8 @@ target_link_libraries(network_service_platform
 )
 add_library(NetworkService::Platform ALIAS network_service_platform)
 
-# Service / Policy: orchestration, lifecycle and normalized network truth.
-# This layer may depend on Platform, never the reverse.
+# Service / Policy: may depend on Platform. Its compile search path gains Service
+# headers here and Platform/Config headers only through NetworkService::Platform.
 add_library(network_service_service STATIC
     src/service/network_control_plane.cpp
     src/service/network_control_plane_reconcile.cpp
@@ -53,6 +57,10 @@ add_library(network_service_service STATIC
     src/service/wifi_profile_policy.cpp
     src/service/wifi_scan_lifecycle.cpp
 )
+target_include_directories(network_service_service
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/service/include>
+)
 target_link_libraries(network_service_service
     PUBLIC
         network_service_build_config
@@ -60,8 +68,8 @@ target_link_libraries(network_service_service
 )
 add_library(NetworkService::Service ALIAS network_service_service)
 
-# IPC: transport/session/codec/business-dispatch/representation boundary. IPC depends
-# on Service; it has no direct dependency on Platform beyond transitive typed data.
+# IPC: transport/session/codec/business-dispatch/representation boundary. IPC sees
+# its own headers plus Service/Platform headers only through the legal link graph.
 add_library(network_service_ipc STATIC
     src/ipc/network_ipc_server.cpp
     src/ipc/network_ipc_representation.cpp
@@ -71,6 +79,10 @@ add_library(network_service_ipc STATIC
     src/ipc/network_ipc_v1_outbound.cpp
     src/ipc/network_ipc_v1_rebase.cpp
     src/ipc/network_ipc_v1_session.cpp
+)
+target_include_directories(network_service_ipc
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/ipc/include>
 )
 target_link_libraries(network_service_ipc
     PUBLIC
