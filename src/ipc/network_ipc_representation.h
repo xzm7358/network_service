@@ -7,10 +7,10 @@
 #include "config/ethernet_config.h"
 #include "network_service_types.h"
 #include "platform/wifi_backend.h"
-#include "platform/wpa_event_monitor.h"
 #include "service/network_operation_result.h"
 #include "service/network_state_change_detector.h"
 #include "service/wifi_scan_lifecycle.h"
+#include "service/wpa_events_view.h"
 
 namespace network_service {
 namespace ipc_representation {
@@ -20,7 +20,7 @@ std::string json_escape(const std::string &value);
 std::string snapshot_payload(const NetworkSnapshot &snapshot);
 std::string state_changes_payload(const NetworkStateChangeSet &changes);
 std::string ping_payload(const PingInfo &info);
-std::string wpa_events_payload(const WpaEventSnapshot &snapshot);
+std::string wpa_events_payload(const WpaEventsView &view);
 std::string ethernet_config_payload(const EthernetConfig &config);
 std::string wifi_scan_payload(const std::vector<WifiApRecord> &records);
 std::string wifi_saved_payload(const std::vector<WifiSavedNetwork> &records);
