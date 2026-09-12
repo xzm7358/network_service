@@ -39,7 +39,7 @@ private:
 
     // Serializes start/stop mechanism calls without participating in the state
     // lock order. This prevents concurrent CONNECTED/DISCONNECTED operations
-    // from spawning or leaving duplicate udhcpc instances.
+    // from spawning or leaving duplicate DHCP client instances.
     std::mutex operation_lock_;
 };
 
