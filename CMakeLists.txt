@@ -59,10 +59,11 @@ target_link_libraries(network_service_service
 )
 add_library(NetworkService::Service ALIAS network_service_service)
 
-# IPC: transport/session/codec/business-dispatch boundary. IPC depends on
-# Service; it has no direct dependency on Platform.
+# IPC: transport/session/codec/business-dispatch/representation boundary. IPC depends
+# on Service; it has no direct dependency on Platform beyond transitive typed data.
 add_library(network_service_ipc STATIC
     src/ipc/network_ipc_server.cpp
+    src/ipc/network_ipc_representation.cpp
     src/ipc/network_ipc_v1_business_dispatch.cpp
     src/ipc/network_ipc_v1_codec.cpp
     src/ipc/network_ipc_v1_event.cpp
@@ -132,6 +133,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(network_ipc_v1_session_test PRIVATE NetworkService::IPC)
     add_test(NAME network_ipc_v1_session COMMAND network_ipc_v1_session_test)
+
+    add_executable(network_ipc_representation_test
+        tests/network_ipc_representation_test.cpp
+    )
+    target_link_libraries(network_ipc_representation_test PRIVATE NetworkService::IPC)
+    add_test(NAME network_ipc_representation COMMAND network_ipc_representation_test)
 
     add_executable(wifi_scan_lifecycle_test
         tests/wifi_scan_lifecycle_test.cpp

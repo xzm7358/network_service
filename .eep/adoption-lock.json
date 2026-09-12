@@ -23,7 +23,7 @@
     "docs/ETH0_FAULT_POLICY.md": "599c00c1f9a488b5b72e6ec15d66f55f7235a647b57742faad6d32ef9545a215",
     "tools/verify_product_adoption.py": "5996286665c2074f025273b228db1c9ae56fdfde13f85c9b177251ca7acc2e10",
     "tools/verify_ipc_source_contract.py": "577f6c5123d4636b68ad75267debfbdd84471cdd1ebcc68cf450dbc145fa852f",
-    "tools/verify_architecture_boundaries.py": "693785c78b5feff50a784ff7e5e4481dd1ecde1b40529604286647d07095695c",
+    "tools/verify_architecture_boundaries.py": "322500f7bb13ff981e821cf6e502dd1045da3ae67350c3e4699788759ae16d0b",
     "tests/ipc_stalled_client_test.py": "1b0334a7eb4a4eff93f84230b30ea61d127f8085114e23ab9579d2f2e82d4ece",
     "docs/engineering/mac-identity-policy.md": "a52063209c41ccf4160a1c2d52e395c7f40c10635f2265f315e9da74cb6abc8a",
     "docs/contracts/ssd20x-rc-evidence-v2.json": "6f583003e1fe022e32748eeeb2b694b3b7f2a2a27c2aa1a5c3da3600bfa79a6a",

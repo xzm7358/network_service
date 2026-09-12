@@ -2,7 +2,6 @@
 
 #include <iostream>
 #include <stdexcept>
-#include <string>
 
 namespace {
 
@@ -50,8 +49,8 @@ void test_first_observation_establishes_baseline() {
     const auto changes = detector.observe(baseline_snapshot());
     require(detector.initialized(), "detector did not initialize");
     require(!changes.any(), "first observation must not emit a change");
-    require(changes.payload_json() == "{\"changed\":[]}",
-            "empty payload contract changed");
+    require(!changes.eth && !changes.wifi && !changes.route && !changes.dns,
+            "baseline change flags must be empty");
 }
 
 void test_identical_snapshot_is_quiet() {
@@ -80,8 +79,6 @@ void test_signal_bars_are_ui_visible_wifi_state() {
     const auto changes = detector.observe(snapshot);
     require(changes.wifi && !changes.eth && !changes.route && !changes.dns,
             "signal_bars change must classify as wifi");
-    require(changes.payload_json() == "{\"changed\":[\"wifi\"]}",
-            "wifi payload contract changed");
 }
 
 void test_typed_wifi_truth_change_is_visible() {
@@ -93,7 +90,7 @@ void test_typed_wifi_truth_change_is_visible() {
     snapshot.wifi.connected = false;
     const auto changes = detector.observe(snapshot);
     require(changes.wifi,
-            "typed L2/IP transition must classify as wifi") ;
+            "typed L2/IP transition must classify as wifi");
 }
 
 void test_eth_state_change() {
@@ -110,7 +107,7 @@ void test_eth_state_change() {
             "ethernet transition classification failed");
 }
 
-void test_route_and_dns_change_have_stable_order() {
+void test_route_and_dns_change_are_distinct_flags() {
     network_service::NetworkStateChangeDetector detector;
     auto snapshot = baseline_snapshot();
     (void)detector.observe(snapshot);
@@ -122,9 +119,6 @@ void test_route_and_dns_change_have_stable_order() {
     const auto changes = detector.observe(snapshot);
     require(!changes.eth && !changes.wifi && changes.route && changes.dns,
             "route/dns transition classification failed");
-    require(changes.payload_json() ==
-                "{\"changed\":[\"route\",\"dns\"]}",
-            "changed category order is not stable");
 }
 
 void test_multiple_categories_share_one_change_set() {
@@ -145,9 +139,6 @@ void test_multiple_categories_share_one_change_set() {
     const auto changes = detector.observe(snapshot);
     require(changes.eth && changes.wifi && changes.route && changes.dns,
             "multi-category transition classification failed");
-    require(changes.payload_json() ==
-                "{\"changed\":[\"eth\",\"wifi\",\"route\",\"dns\"]}",
-            "multi-category payload contract changed");
 }
 
 void test_reset_requires_new_baseline() {
@@ -170,10 +161,10 @@ int main() {
         test_signal_bars_are_ui_visible_wifi_state();
         test_typed_wifi_truth_change_is_visible();
         test_eth_state_change();
-        test_route_and_dns_change_have_stable_order();
+        test_route_and_dns_change_are_distinct_flags();
         test_multiple_categories_share_one_change_set();
         test_reset_requires_new_baseline();
-        std::cout << "Network state change detector contract tests passed\n";
+        std::cout << "Network state change detector semantic tests passed\n";
         return 0;
     } catch (const std::exception &e) {
         std::cerr << "Network state change detector test failed: " << e.what() << '\n';

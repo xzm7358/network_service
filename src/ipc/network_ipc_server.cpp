@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "ipc/network_ipc_representation.h"
 #include "ipc/network_ipc_v1_business_dispatch.h"
 #include "ipc/network_ipc_v1_codec.h"
 #include "ipc/network_ipc_v1_outbound.h"
@@ -165,6 +166,15 @@ static int send_flags() {
     flags |= MSG_DONTWAIT;
 #endif
     return flags;
+}
+
+template <typename T>
+std::string v0_operation_response(const NetworkOperationResult<T> &result,
+                                  std::string (*payload_encoder)(const T &)) {
+    if (!result.ok()) {
+        return ipc_representation::v0_error(result.status, result.error);
+    }
+    return ipc_representation::v0_success(result.status, payload_encoder(result.value));
 }
 
 } // namespace
@@ -335,7 +345,8 @@ void NetworkIpcServer::run() {
     auto observe_state = [&]() {
         const NetworkStateChangeSet changes = state_detector.observe(daemon_.snapshot());
         if (!changes.any()) return;
-        if (!broadcast_event("network.state.changed", changes.payload_json())) {
+        if (!broadcast_event("network.state.changed",
+                             ipc_representation::state_changes_payload(changes))) {
             std::cerr << "network_service: IPC_V1_STATE_EVENT_ALLOCATION_FAILED"
                       << std::endl;
         }
@@ -456,7 +467,7 @@ void NetworkIpcServer::run() {
                 result.action_request_id,
                 generation_,
                 event_sequencer_.last_sequence(),
-                daemon_.snapshot_result_json());
+                ipc_representation::snapshot_payload(daemon_.snapshot()));
             if (response.empty() || !enqueue_frame(client, std::move(response))) {
                 client.closed = true;
                 return false;
@@ -487,9 +498,7 @@ void NetworkIpcServer::run() {
                 break;
             }
             if (!process_v1_frame(client)) break;
-            if (!client.outbound.empty()) {
-                flush_client(client);
-            }
+            if (!client.outbound.empty()) flush_client(client);
         }
     };
 
@@ -554,8 +563,7 @@ void NetworkIpcServer::run() {
                 client.last_input_activity = Clock::now();
 
                 if (client.protocol == ClientProtocol::Undecided) {
-                    const auto *bytes =
-                        reinterpret_cast<const std::uint8_t *>(buffer);
+                    const auto *bytes = reinterpret_cast<const std::uint8_t *>(buffer);
                     client.initial.insert(client.initial.end(), bytes, bytes + count);
                     if (client.initial.size() > kMaxRequestBytes) {
                         client.closed = true;
@@ -570,18 +578,15 @@ void NetworkIpcServer::run() {
                     }
                     complete_v0_if_ready(client);
                 } else {
-                    const auto *bytes =
-                        reinterpret_cast<const std::uint8_t *>(buffer);
-                    if (client.decoder.feed(bytes, count) ==
-                        ipc_v1::DecodeStatus::Error) {
+                    const auto *bytes = reinterpret_cast<const std::uint8_t *>(buffer);
+                    if (client.decoder.feed(bytes, count) == ipc_v1::DecodeStatus::Error) {
                         client.closed = true;
                         break;
                     }
                     service_buffered_v1(client);
                 }
 
-                if (client.protocol == ClientProtocol::V1 &&
-                    client.decoder.has_frame()) {
+                if (client.protocol == ClientProtocol::V1 && client.decoder.has_frame()) {
                     service_buffered_v1(client);
                 }
                 continue;
@@ -640,8 +645,7 @@ void NetworkIpcServer::run() {
                     .count();
             int candidate = 0;
             if (remaining > 0) {
-                candidate =
-                    remaining > INT_MAX ? INT_MAX : static_cast<int>(remaining);
+                candidate = remaining > INT_MAX ? INT_MAX : static_cast<int>(remaining);
             }
             if (timeout < 0 || candidate < timeout) timeout = candidate;
         };
@@ -729,19 +733,16 @@ void NetworkIpcServer::run() {
             polled_clients.push_back(&client);
         }
 
-        const int ret =
-            poll(fds.data(), static_cast<nfds_t>(fds.size()), poll_timeout_ms());
+        const int ret = poll(fds.data(), static_cast<nfds_t>(fds.size()), poll_timeout_ms());
         if (ret < 0) {
             if (errno == EINTR) continue;
-            std::cerr << "network_service: poll failed: " << strerror(errno)
-                      << std::endl;
+            std::cerr << "network_service: poll failed: " << strerror(errno) << std::endl;
             continue;
         }
         if (ret == 0) continue;
 
         if (wake_index != static_cast<std::size_t>(-1) &&
-            (fds[wake_index].revents &
-             (POLLIN | POLLERR | POLLHUP | POLLNVAL))) {
+            (fds[wake_index].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL))) {
             char drain[32];
             while (read(wake_read_fd_, drain, sizeof(drain)) > 0) {}
             running_ = false;
@@ -785,8 +786,7 @@ void NetworkIpcServer::run() {
                     continue;
                 }
 
-                clients.push_back(
-                    std::make_unique<ClientState>(client_fd, Clock::now()));
+                clients.push_back(std::make_unique<ClientState>(client_fd, Clock::now()));
             }
         }
 
@@ -801,9 +801,7 @@ void NetworkIpcServer::run() {
                 continue;
             }
 
-            if ((revents & POLLOUT) && !client.outbound.empty()) {
-                flush_client(client);
-            }
+            if ((revents & POLLOUT) && !client.outbound.empty()) flush_client(client);
             if (client.closed) continue;
 
             if ((revents & (POLLIN | POLLHUP)) && client.outbound.empty() &&
@@ -820,9 +818,7 @@ void NetworkIpcServer::run() {
         }
     }
 
-    for (auto &entry : clients) {
-        close_client(*entry);
-    }
+    for (auto &entry : clients) close_client(*entry);
     clients.clear();
 }
 
@@ -833,71 +829,74 @@ void NetworkIpcServer::stop() {
         close(listen_fd_);
         listen_fd_ = -1;
     }
-    if (!socket_path_.empty()) {
-        unlink(socket_path_.c_str());
-    }
+    if (!socket_path_.empty()) unlink(socket_path_.c_str());
 }
 
 std::string NetworkIpcServer::handle_request(const std::string &request) {
-    std::string method = extract_method(request);
+    const std::string method = extract_method(request);
+    std::string response;
+
     if (method == kMethodPing) {
-        return daemon_.ping_json() + "\n";
+        response = ipc_representation::v0_success(
+            200, ipc_representation::ping_payload(daemon_.ping()));
+    } else if (method == kMethodSnapshot || method.empty()) {
+        response = ipc_representation::v0_success(
+            200, ipc_representation::snapshot_payload(daemon_.snapshot()));
+    } else if (method == "eth.get_config") {
+        response = v0_operation_response(daemon_.eth_get_config(),
+                                         ipc_representation::ethernet_config_payload);
+    } else if (method == "eth.set_dhcp") {
+        response = v0_operation_response(daemon_.eth_set_dhcp(),
+                                         ipc_representation::ethernet_config_payload);
+    } else if (method == "eth.set_static") {
+        response = v0_operation_response(
+            daemon_.eth_set_static(extract_json_string(request, "ip"),
+                                   extract_json_string(request, "mask"),
+                                   extract_json_string(request, "gateway"),
+                                   extract_json_string(request, "dns")),
+            ipc_representation::ethernet_config_payload);
+    } else if (method == "wpa.events") {
+        response = v0_operation_response(daemon_.wpa_events(),
+                                         ipc_representation::wpa_events_payload);
+    } else if (method == "wifi.scan") {
+        response = v0_operation_response(daemon_.wifi_scan(),
+                                         ipc_representation::wifi_scan_payload);
+    } else if (method == "wifi.set_enabled") {
+        const std::string enabled = extract_json_string(request, "enabled");
+        response = v0_operation_response(
+            daemon_.wifi_set_enabled(enabled == "1" || enabled == "true"),
+            ipc_representation::wifi_enabled_payload);
+    } else if (method == "wifi.connect") {
+        response = v0_operation_response(
+            daemon_.wifi_connect(extract_json_string(request, "ssid"),
+                                 extract_json_string(request, "password")),
+            ipc_representation::wifi_command_payload);
+    } else if (method == "wifi.connect_saved") {
+        response = v0_operation_response(
+            daemon_.wifi_connect_saved(extract_json_string(request, "ssid")),
+            ipc_representation::wifi_command_payload);
+    } else if (method == "wifi.saved_list") {
+        response = v0_operation_response(daemon_.wifi_list_saved(),
+                                         ipc_representation::wifi_saved_payload);
+    } else if (method == "wifi.forget") {
+        response = v0_operation_response(
+            daemon_.wifi_forget(extract_json_string(request, "ssid")),
+            ipc_representation::wifi_command_payload);
+    } else if (method == "wifi.autoconnect") {
+        const std::string enabled = extract_json_string(request, "enabled");
+        response = v0_operation_response(
+            daemon_.wifi_set_autoconnect(extract_json_string(request, "ssid"),
+                                         enabled == "1" || enabled == "true"),
+            ipc_representation::wifi_command_payload);
+    } else if (method == "wifi.disconnect") {
+        response = v0_operation_response(daemon_.wifi_disconnect(),
+                                         ipc_representation::wifi_command_payload);
+    } else {
+        response = ipc_representation::v0_error(404, "unknown method");
     }
-    if (method == kMethodSnapshot || method.empty()) {
-        return daemon_.snapshot_json() + "\n";
-    }
-    if (method == "eth.get_config") {
-        return daemon_.eth_get_config_json() + "\n";
-    }
-    if (method == "eth.set_dhcp") {
-        return daemon_.eth_set_dhcp_json() + "\n";
-    }
-    if (method == "eth.set_static") {
-        return daemon_.eth_set_static_json(extract_json_string(request, "ip"),
-                                           extract_json_string(request, "mask"),
-                                           extract_json_string(request, "gateway"),
-                                           extract_json_string(request, "dns")) +
-               "\n";
-    }
-    if (method == "wpa.events") {
-        return daemon_.wpa_events_json() + "\n";
-    }
-    if (method == "wifi.scan") {
-        return daemon_.wifi_scan_json() + "\n";
-    }
-    if (method == "wifi.set_enabled") {
-        std::string enabled = extract_json_string(request, "enabled");
-        return daemon_.wifi_set_enabled_json(enabled == "1" || enabled == "true") +
-               "\n";
-    }
-    if (method == "wifi.connect") {
-        return daemon_.wifi_connect_json(extract_json_string(request, "ssid"),
-                                         extract_json_string(request, "password")) +
-               "\n";
-    }
-    if (method == "wifi.connect_saved") {
-        return daemon_.wifi_connect_saved_json(
-                   extract_json_string(request, "ssid")) +
-               "\n";
-    }
-    if (method == "wifi.saved_list") {
-        return daemon_.wifi_list_saved_json() + "\n";
-    }
-    if (method == "wifi.forget") {
-        return daemon_.wifi_forget_json(extract_json_string(request, "ssid")) +
-               "\n";
-    }
-    if (method == "wifi.autoconnect") {
-        std::string enabled = extract_json_string(request, "enabled");
-        return daemon_.wifi_set_autoconnect_json(
-                   extract_json_string(request, "ssid"),
-                   enabled == "1" || enabled == "true") +
-               "\n";
-    }
-    if (method == "wifi.disconnect") {
-        return daemon_.wifi_disconnect_json() + "\n";
-    }
-    return "{\"status\":404,\"error\":\"unknown method\"}\n";
+
+    response.push_back('\n');
+    return response;
 }
 
 } // namespace network_service

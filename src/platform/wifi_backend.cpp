@@ -39,22 +39,6 @@ static bool wpa_quote(const std::string &value, std::string &quoted, std::string
     return true;
 }
 
-static std::string json_escape(const std::string &value) {
-    std::string out;
-    out.reserve(value.size() + 8);
-    for (char ch : value) {
-        switch (ch) {
-        case '\\': out += "\\\\"; break;
-        case '"': out += "\\\""; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default: out += ch; break;
-        }
-    }
-    return out;
-}
-
 static bool run_command(const std::string &cmd, std::string &error) {
     int rc = system(cmd.c_str());
     if (rc != 0) {
@@ -68,11 +52,15 @@ static bool run_command(const std::string &cmd, std::string &error) {
 
 static std::string trim(const std::string &value) {
     size_t begin = 0;
-    while (begin < value.size() && (value[begin] == ' ' || value[begin] == '\t' || value[begin] == '\r' || value[begin] == '\n')) {
+    while (begin < value.size() &&
+           (value[begin] == ' ' || value[begin] == '\t' || value[begin] == '\r' ||
+            value[begin] == '\n')) {
         ++begin;
     }
     size_t end = value.size();
-    while (end > begin && (value[end - 1] == ' ' || value[end - 1] == '\t' || value[end - 1] == '\r' || value[end - 1] == '\n')) {
+    while (end > begin &&
+           (value[end - 1] == ' ' || value[end - 1] == '\t' ||
+            value[end - 1] == '\r' || value[end - 1] == '\n')) {
         --end;
     }
     return value.substr(begin, end - begin);
@@ -123,9 +111,7 @@ static bool wpa_ok(const std::string &iface,
 static int parse_network_id(const std::string &value) {
     char *end = nullptr;
     long id = strtol(value.c_str(), &end, 10);
-    if (end == value.c_str() || id < 0 || id > 4096) {
-        return -1;
-    }
+    if (end == value.c_str() || id < 0 || id > 4096) return -1;
     return static_cast<int>(id);
 }
 
@@ -134,9 +120,7 @@ static int wpa_add_network(const std::string &iface, std::string &error) {
     if (!wpa_request(iface, "ADD_NETWORK", reply, error)) return -1;
     const std::string normalized = trim(reply);
     int id = parse_network_id(normalized);
-    if (id < 0 && error.empty()) {
-        error = "invalid ADD_NETWORK result: " + normalized;
-    }
+    if (id < 0 && error.empty()) error = "invalid ADD_NETWORK result: " + normalized;
     return id;
 }
 
@@ -167,24 +151,47 @@ static std::vector<WifiSavedNetwork> parse_saved_networks(const std::string &out
         record.bssid = fields.size() >= 3 ? fields[2] : "";
         record.flags = fields.size() >= 4 ? fields[3] : "";
         parse_saved_flags(record.flags, record);
-        if (record.network_id >= 0) {
-            records.push_back(record);
-        }
+        if (record.network_id >= 0) records.push_back(record);
     }
     return records;
 }
 
-static int find_saved_network_id(const std::string &iface, const std::string &ssid, std::string &error) {
+static int find_saved_network_id(const std::string &iface,
+                                 const std::string &ssid,
+                                 std::string &error) {
     std::string reply;
     if (!wpa_request(iface, "LIST_NETWORKS", reply, error)) return -1;
     std::vector<WifiSavedNetwork> records = parse_saved_networks(reply);
     for (const auto &record : records) {
-        if (record.ssid == ssid) {
-            return record.network_id;
-        }
+        if (record.ssid == ssid) return record.network_id;
     }
     error = "saved network not found: " + ssid;
     return -1;
+}
+
+static std::vector<WifiApRecord> parse_scan_results(const std::string &output) {
+    std::vector<WifiApRecord> records;
+    std::istringstream input(output);
+    std::string line;
+    bool header = true;
+    while (std::getline(input, line)) {
+        line = trim(line);
+        if (line.empty()) continue;
+        if (header) {
+            header = false;
+            continue;
+        }
+        std::vector<std::string> fields = split_tab_line(line);
+        if (fields.size() < 5) continue;
+        WifiApRecord record;
+        record.bssid = fields[0];
+        record.frequency = atoi(fields[1].c_str());
+        record.signal_dbm = atoi(fields[2].c_str());
+        record.flags = fields[3];
+        record.ssid = fields[4];
+        records.push_back(record);
+    }
+    return records;
 }
 
 } // namespace
@@ -266,7 +273,9 @@ bool wifi_connect(const std::string &iface,
     return true;
 }
 
-bool wifi_connect_saved(const std::string &iface, const std::string &ssid, std::string &error) {
+bool wifi_connect_saved(const std::string &iface,
+                        const std::string &ssid,
+                        std::string &error) {
     if (!is_safe_iface(iface)) {
         error = "invalid wifi iface";
         return false;
@@ -285,7 +294,9 @@ bool wifi_connect_saved(const std::string &iface, const std::string &ssid, std::
     return true;
 }
 
-bool wifi_forget_saved(const std::string &iface, const std::string &ssid, std::string &error) {
+bool wifi_forget_saved(const std::string &iface,
+                       const std::string &ssid,
+                       std::string &error) {
     if (!is_safe_iface(iface)) {
         error = "invalid wifi iface";
         return false;
@@ -307,36 +318,12 @@ bool wifi_set_autoconnect(const std::string &iface,
     int id = find_saved_network_id(iface, ssid, error);
     if (id < 0) return false;
     if (!wpa_ok(iface,
-                std::string(enabled ? "ENABLE_NETWORK " : "DISABLE_NETWORK ") + std::to_string(id),
+                std::string(enabled ? "ENABLE_NETWORK " : "DISABLE_NETWORK ") +
+                    std::to_string(id),
                 error)) {
         return false;
     }
     return wpa_ok(iface, "SAVE_CONFIG", error);
-}
-
-static std::vector<WifiApRecord> parse_scan_results(const std::string &output) {
-    std::vector<WifiApRecord> records;
-    std::istringstream input(output);
-    std::string line;
-    bool header = true;
-    while (std::getline(input, line)) {
-        line = trim(line);
-        if (line.empty()) continue;
-        if (header) {
-            header = false;
-            continue;
-        }
-        std::vector<std::string> fields = split_tab_line(line);
-        if (fields.size() < 5) continue;
-        WifiApRecord record;
-        record.bssid = fields[0];
-        record.frequency = atoi(fields[1].c_str());
-        record.signal_dbm = atoi(fields[2].c_str());
-        record.flags = fields[3];
-        record.ssid = fields[4];
-        records.push_back(record);
-    }
-    return records;
 }
 
 bool wifi_scan_start(const std::string &iface, std::string &error) {
@@ -345,13 +332,12 @@ bool wifi_scan_start(const std::string &iface, std::string &error) {
         error = "invalid wifi iface";
         return false;
     }
-    if (!run_command("ifconfig " + iface + " up", error)) {
-        return false;
-    }
+    if (!run_command("ifconfig " + iface + " up", error)) return false;
     return wpa_ok(iface, "SCAN", error);
 }
 
-std::vector<WifiApRecord> wifi_scan_results(const std::string &iface, std::string &error) {
+std::vector<WifiApRecord> wifi_scan_results(const std::string &iface,
+                                            std::string &error) {
     error.clear();
     if (!is_safe_iface(iface)) {
         error = "invalid wifi iface";
@@ -368,15 +354,14 @@ std::vector<WifiApRecord> wifi_scan(const std::string &iface, std::string &error
         error = "invalid wifi iface";
         return records;
     }
-    if (!run_command("ifconfig " + iface + " up", error)) {
-        return records;
-    }
+    if (!run_command("ifconfig " + iface + " up", error)) return records;
     if (!wpa_ok(iface, "SCAN", error)) return records;
     usleep(1200 * 1000);
     return wifi_scan_results(iface, error);
 }
 
-std::vector<WifiSavedNetwork> wifi_list_saved(const std::string &iface, std::string &error) {
+std::vector<WifiSavedNetwork> wifi_list_saved(const std::string &iface,
+                                              std::string &error) {
     if (!is_safe_iface(iface)) {
         error = "invalid wifi iface";
         return {};
@@ -384,45 +369,6 @@ std::vector<WifiSavedNetwork> wifi_list_saved(const std::string &iface, std::str
     std::string reply;
     if (!wpa_request(iface, "LIST_NETWORKS", reply, error)) return {};
     return parse_saved_networks(reply);
-}
-
-std::string wifi_scan_to_json(const std::vector<WifiApRecord> &records) {
-    std::ostringstream os;
-    os << "{\"count\":" << records.size() << ",\"aps\":[";
-    for (size_t i = 0; i < records.size(); ++i) {
-        const WifiApRecord &record = records[i];
-        if (i > 0) os << ",";
-        os << "{"
-           << "\"bssid\":\"" << json_escape(record.bssid) << "\","
-           << "\"frequency\":" << record.frequency << ","
-           << "\"signal\":" << record.signal_dbm << ","
-           << "\"flags\":\"" << json_escape(record.flags) << "\","
-           << "\"ssid\":\"" << json_escape(record.ssid) << "\""
-           << "}";
-    }
-    os << "]}";
-    return os.str();
-}
-
-std::string wifi_saved_to_json(const std::vector<WifiSavedNetwork> &records) {
-    std::ostringstream os;
-    os << "{\"count\":" << records.size() << ",\"saved\":[";
-    for (size_t i = 0; i < records.size(); ++i) {
-        const WifiSavedNetwork &record = records[i];
-        if (i > 0) os << ",";
-        os << "{"
-           << "\"network_id\":" << record.network_id << ","
-           << "\"ssid\":\"" << json_escape(record.ssid) << "\","
-           << "\"bssid\":\"" << json_escape(record.bssid) << "\","
-           << "\"flags\":\"" << json_escape(record.flags) << "\","
-           << "\"current\":" << (record.is_current ? "true" : "false") << ","
-           << "\"disabled\":" << (record.is_disabled ? "true" : "false") << ","
-           << "\"temp_disabled\":" << (record.is_temp_disabled ? "true" : "false") << ","
-           << "\"autoconnect\":" << (record.autoconnect ? "true" : "false")
-           << "}";
-    }
-    os << "]}";
-    return os.str();
 }
 
 } // namespace network_service

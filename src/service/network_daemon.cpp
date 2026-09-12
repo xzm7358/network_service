@@ -1,7 +1,6 @@
 #include "service/network_daemon.h"
 
 #include <iostream>
-#include <sstream>
 #include <string>
 #include <utility>
 
@@ -9,48 +8,18 @@
 #define NETWORK_SERVICE_VERSION "0.1.0"
 #endif
 
-#include "config/ethernet_config.h"
 #include "platform/dhcp_lease_store.h"
 #include "platform/interface_snapshot.h"
 #include "platform/netlink_monitor.h"
 #include "platform/network_configurator.h"
 #include "platform/udhcpc_process.h"
-#include "platform/wifi_backend.h"
-#include "platform/wpa_event_monitor.h"
 #include "service/network_control_plane.h"
 #include "service/network_state.h"
 #include "service/wifi_manager.h"
-#include "service/wifi_scan_lifecycle.h"
 
 namespace network_service {
 
 namespace {
-
-static std::string json_escape(const std::string &value) {
-    std::string out;
-    out.reserve(value.size() + 8);
-    for (char ch : value) {
-        switch (ch) {
-        case '\\': out += "\\\\"; break;
-        case '"': out += "\\\""; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default: out += ch; break;
-        }
-    }
-    return out;
-}
-
-static std::string ok_json(const std::string &result_json) {
-    return "{\"status\":200,\"result\":" + result_json + "}";
-}
-
-static std::string error_json(int status, const std::string &message) {
-    std::ostringstream os;
-    os << "{\"status\":" << status << ",\"error\":\"" << json_escape(message) << "\"}";
-    return os.str();
-}
 
 static WifiRuntimeFact make_wifi_runtime_fact(const WpaEventSnapshot &events,
                                               const WifiManagerState &manager) {
@@ -85,6 +54,12 @@ static void project_wpa_compatibility(WpaEventSnapshot &events,
     } else if (runtime.l2_state != WifiL2State::Failed) {
         events.failure_reason.clear();
     }
+}
+
+static WifiCommandResult command_result(std::string requested) {
+    WifiCommandResult result;
+    result.requested = std::move(requested);
+    return result;
 }
 
 } // namespace
@@ -171,10 +146,10 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
 
     wifi_scan_lifecycle_.reset(new WifiScanLifecycle(
         [this](std::string &error) {
-            return wifi_scan_start(wifi_iface_, error);
+            return network_service::wifi_scan_start(wifi_iface_, error);
         },
         [this](std::string &error) {
-            return wifi_scan_results(wifi_iface_, error);
+            return network_service::wifi_scan_results(wifi_iface_, error);
         },
         [this]() {
             const WpaEventSnapshot events = wpa_monitor_->snapshot();
@@ -240,43 +215,35 @@ NetworkSnapshot NetworkDaemon::snapshot() const {
     if (wifi_manager_) manager = wifi_manager_->state();
 
     normalize_network_snapshot(truth, make_wifi_runtime_fact(events, manager));
+    if (control_plane_) truth.route_policy = control_plane_->route_policy();
     return truth;
 }
 
-std::string NetworkDaemon::snapshot_result_json() const {
-    return snapshot_to_json(snapshot());
+PingInfo NetworkDaemon::ping() const {
+    PingInfo info;
+    info.service = "network_service";
+    info.version = NETWORK_SERVICE_VERSION;
+    info.mode = "explicit_apply";
+    return info;
 }
 
-std::string NetworkDaemon::snapshot_json() const {
-    return ok_json(snapshot_result_json());
-}
-
-std::string NetworkDaemon::ping_json() const {
-    std::ostringstream os;
-    os << "{\"service\":\"network_service\","
-       << "\"version\":\"" << NETWORK_SERVICE_VERSION << "\","
-       << "\"mode\":\"explicit_apply\"}";
-    return ok_json(os.str());
-}
-
-std::string NetworkDaemon::wpa_events_json() const {
-    if (!wpa_monitor_) {
-        return ok_json("{\"attached\":false}");
+NetworkOperationResult<WpaEventSnapshot> NetworkDaemon::wpa_events() const {
+    WpaEventSnapshot events;
+    if (wpa_monitor_) {
+        events = wpa_monitor_->snapshot();
+        WifiManagerState manager;
+        if (wifi_manager_) manager = wifi_manager_->state();
+        project_wpa_compatibility(events, snapshot(), manager);
     }
-
-    WpaEventSnapshot events = wpa_monitor_->snapshot();
-    WifiManagerState manager;
-    if (wifi_manager_) manager = wifi_manager_->state();
-    project_wpa_compatibility(events, snapshot(), manager);
-    return ok_json(wpa_event_snapshot_to_json(events));
+    return NetworkOperationResult<WpaEventSnapshot>::success(std::move(events));
 }
 
-std::string NetworkDaemon::eth_get_config_json() const {
-    EthernetConfig config = load_ethernet_config(config_dir_, eth_iface_);
-    return ok_json(ethernet_config_to_json(config));
+NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_get_config() const {
+    return NetworkOperationResult<EthernetConfig>::success(
+        load_ethernet_config(config_dir_, eth_iface_));
 }
 
-std::string NetworkDaemon::eth_set_dhcp_json() const {
+NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_set_dhcp() const {
     EthernetConfig config = load_ethernet_config(config_dir_, eth_iface_);
     config.iface = eth_iface_;
     config.method = "dhcp";
@@ -288,21 +255,26 @@ std::string NetworkDaemon::eth_set_dhcp_json() const {
     config.dns_enabled = true;
 
     if (!save_ethernet_config(config_dir_, config)) {
-        return error_json(500, "failed to save ethernet config");
+        return NetworkOperationResult<EthernetConfig>::failure(
+            500, "failed to save ethernet config");
+    }
+    if (!control_plane_) {
+        return NetworkOperationResult<EthernetConfig>::failure(
+            500, "network control plane unavailable");
     }
 
-    if (!control_plane_) return error_json(500, "network control plane unavailable");
     std::string error;
     if (!control_plane_->start_dhcp(eth_iface_, error)) {
-        return error_json(500, error);
+        return NetworkOperationResult<EthernetConfig>::failure(500, std::move(error));
     }
-    return ok_json(ethernet_config_to_json(config));
+    return NetworkOperationResult<EthernetConfig>::success(std::move(config));
 }
 
-std::string NetworkDaemon::eth_set_static_json(const std::string &ip,
-                                               const std::string &mask,
-                                               const std::string &gateway,
-                                               const std::string &dns) const {
+NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_set_static(
+    const std::string &ip,
+    const std::string &mask,
+    const std::string &gateway,
+    const std::string &dns) const {
     EthernetConfig config = load_ethernet_config(config_dir_, eth_iface_);
     config.iface = eth_iface_;
     config.method = "static";
@@ -314,10 +286,14 @@ std::string NetworkDaemon::eth_set_static_json(const std::string &ip,
     config.dns_enabled = !dns.empty();
 
     if (!save_ethernet_config(config_dir_, config)) {
-        return error_json(500, "failed to save ethernet config");
+        return NetworkOperationResult<EthernetConfig>::failure(
+            500, "failed to save ethernet config");
+    }
+    if (!control_plane_) {
+        return NetworkOperationResult<EthernetConfig>::failure(
+            500, "network control plane unavailable");
     }
 
-    if (!control_plane_) return error_json(500, "network control plane unavailable");
     std::string error;
     if (!control_plane_->apply_ethernet_static(config.ip4,
                                                config.netmask4,
@@ -325,111 +301,113 @@ std::string NetworkDaemon::eth_set_static_json(const std::string &ip,
                                                config.dns4,
                                                config.route_metric,
                                                error)) {
-        return error_json(500, error);
+        return NetworkOperationResult<EthernetConfig>::failure(500, std::move(error));
     }
-    return ok_json(ethernet_config_to_json(config));
+    return NetworkOperationResult<EthernetConfig>::success(std::move(config));
 }
 
-std::string NetworkDaemon::wifi_scan_json() const {
+NetworkOperationResult<std::vector<WifiApRecord>> NetworkDaemon::wifi_scan() const {
     std::string error;
-    std::vector<WifiApRecord> records = wifi_scan(wifi_iface_, error);
+    std::vector<WifiApRecord> records = network_service::wifi_scan(wifi_iface_, error);
     if (!error.empty() && records.empty()) {
-        return error_json(500, error);
+        return NetworkOperationResult<std::vector<WifiApRecord>>::failure(
+            500, std::move(error));
     }
-    return ok_json(wifi_scan_to_json(records));
+    return NetworkOperationResult<std::vector<WifiApRecord>>::success(std::move(records));
 }
 
-static std::string wifi_scan_lifecycle_json(const WifiScanStatus &status) {
-    std::ostringstream os;
-    os << "{\"scanId\":" << status.scan_id
-       << ",\"state\":\"" << wifi_scan_state_name(status.state) << "\""
-       << ",\"error\":\"" << json_escape(status.error) << "\""
-       << ",\"results\":" << wifi_scan_to_json(status.records)
-       << "}";
-    return os.str();
-}
-
-std::string NetworkDaemon::wifi_scan_start_json() {
+NetworkOperationResult<WifiScanStatus> NetworkDaemon::wifi_scan_start() {
     if (!wifi_scan_lifecycle_) {
-        return error_json(500, "wifi scan lifecycle unavailable");
+        return NetworkOperationResult<WifiScanStatus>::failure(
+            500, "wifi scan lifecycle unavailable");
     }
     WifiScanStatus status = wifi_scan_lifecycle_->start();
     if (status.state == WifiScanState::Failed) {
-        return error_json(500, status.error);
+        return NetworkOperationResult<WifiScanStatus>::failure(500, status.error);
     }
-    return std::string("{\"status\":202,\"result\":") +
-           wifi_scan_lifecycle_json(status) + "}";
+    return NetworkOperationResult<WifiScanStatus>::success(std::move(status), 202);
 }
 
-std::string NetworkDaemon::wifi_scan_status_json() {
+NetworkOperationResult<WifiScanStatus> NetworkDaemon::wifi_scan_status() {
     if (!wifi_scan_lifecycle_) {
-        return error_json(500, "wifi scan lifecycle unavailable");
+        return NetworkOperationResult<WifiScanStatus>::failure(
+            500, "wifi scan lifecycle unavailable");
     }
-    return ok_json(wifi_scan_lifecycle_json(wifi_scan_lifecycle_->poll()));
+    return NetworkOperationResult<WifiScanStatus>::success(wifi_scan_lifecycle_->poll());
 }
 
-std::string NetworkDaemon::wifi_set_enabled_json(bool enabled) const {
-    if (!enabled && wifi_manager_) {
-        wifi_manager_->stop_dhcp();
-    }
+NetworkOperationResult<WifiEnabledResult> NetworkDaemon::wifi_set_enabled(bool enabled) const {
+    if (!enabled && wifi_manager_) wifi_manager_->stop_dhcp();
+
     std::string error;
-    if (!wifi_set_enabled(wifi_iface_, enabled, error)) {
-        return error_json(500, error);
+    if (!network_service::wifi_set_enabled(wifi_iface_, enabled, error)) {
+        return NetworkOperationResult<WifiEnabledResult>::failure(500, std::move(error));
     }
-    return ok_json(std::string("{\"enabled\":") + (enabled ? "true" : "false") + "}");
+    WifiEnabledResult result;
+    result.enabled = enabled;
+    return NetworkOperationResult<WifiEnabledResult>::success(result);
 }
 
-std::string NetworkDaemon::wifi_connect_json(const std::string &ssid, const std::string &password) const {
+NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_connect(
+    const std::string &ssid,
+    const std::string &password) const {
     std::string error;
-    if (!wifi_connect(wifi_iface_, ssid, password, error)) {
-        return error_json(500, error);
+    if (!network_service::wifi_connect(wifi_iface_, ssid, password, error)) {
+        return NetworkOperationResult<WifiCommandResult>::failure(500, std::move(error));
     }
-    return ok_json("{\"requested\":\"connect\"}");
+    return NetworkOperationResult<WifiCommandResult>::success(command_result("connect"));
 }
 
-std::string NetworkDaemon::wifi_connect_saved_json(const std::string &ssid) const {
+NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_connect_saved(
+    const std::string &ssid) const {
     std::string error;
-    if (!wifi_connect_saved(wifi_iface_, ssid, error)) {
-        return error_json(500, error);
+    if (!network_service::wifi_connect_saved(wifi_iface_, ssid, error)) {
+        return NetworkOperationResult<WifiCommandResult>::failure(500, std::move(error));
     }
-    return ok_json("{\"requested\":\"connect_saved\"}");
+    return NetworkOperationResult<WifiCommandResult>::success(command_result("connect_saved"));
 }
 
-std::string NetworkDaemon::wifi_list_saved_json() const {
+NetworkOperationResult<std::vector<WifiSavedNetwork>> NetworkDaemon::wifi_list_saved() const {
     std::string error;
-    std::vector<WifiSavedNetwork> records = wifi_list_saved(wifi_iface_, error);
+    std::vector<WifiSavedNetwork> records =
+        network_service::wifi_list_saved(wifi_iface_, error);
     if (!error.empty() && records.empty()) {
-        return error_json(500, error);
+        return NetworkOperationResult<std::vector<WifiSavedNetwork>>::failure(
+            500, std::move(error));
     }
-    return ok_json(wifi_saved_to_json(records));
+    return NetworkOperationResult<std::vector<WifiSavedNetwork>>::success(std::move(records));
 }
 
-std::string NetworkDaemon::wifi_forget_json(const std::string &ssid) const {
+NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_forget(
+    const std::string &ssid) const {
     std::string error;
-    if (!wifi_forget_saved(wifi_iface_, ssid, error)) {
-        return error_json(500, error);
+    if (!network_service::wifi_forget_saved(wifi_iface_, ssid, error)) {
+        return NetworkOperationResult<WifiCommandResult>::failure(500, std::move(error));
     }
-    return ok_json("{\"requested\":\"forget\"}");
+    return NetworkOperationResult<WifiCommandResult>::success(command_result("forget"));
 }
 
-std::string NetworkDaemon::wifi_set_autoconnect_json(const std::string &ssid, bool enabled) const {
+NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_set_autoconnect(
+    const std::string &ssid,
+    bool enabled) const {
     std::string error;
-    if (!wifi_set_autoconnect(wifi_iface_, ssid, enabled, error)) {
-        return error_json(500, error);
+    if (!network_service::wifi_set_autoconnect(wifi_iface_, ssid, enabled, error)) {
+        return NetworkOperationResult<WifiCommandResult>::failure(500, std::move(error));
     }
-    return ok_json(std::string("{\"requested\":\"autoconnect\",\"enabled\":") +
-                   (enabled ? "true" : "false") + "}");
+    WifiCommandResult result = command_result("autoconnect");
+    result.has_enabled = true;
+    result.enabled = enabled;
+    return NetworkOperationResult<WifiCommandResult>::success(std::move(result));
 }
 
-std::string NetworkDaemon::wifi_disconnect_json() const {
-    if (wifi_manager_) {
-        wifi_manager_->stop_dhcp();
-    }
+NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_disconnect() const {
+    if (wifi_manager_) wifi_manager_->stop_dhcp();
+
     std::string error;
-    if (!wifi_disconnect(wifi_iface_, error)) {
-        return error_json(500, error);
+    if (!network_service::wifi_disconnect(wifi_iface_, error)) {
+        return NetworkOperationResult<WifiCommandResult>::failure(500, std::move(error));
     }
-    return ok_json("{\"requested\":\"disconnect\"}");
+    return NetworkOperationResult<WifiCommandResult>::success(command_result("disconnect"));
 }
 
 } // namespace network_service

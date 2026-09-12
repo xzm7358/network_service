@@ -1,7 +1,5 @@
 #include "service/network_state_change_detector.h"
 
-#include <sstream>
-
 namespace network_service {
 namespace {
 
@@ -30,24 +28,6 @@ bool interface_semantically_equal(const InterfaceSnapshot &lhs,
 
 bool NetworkStateChangeSet::any() const {
     return eth || wifi || route || dns;
-}
-
-std::string NetworkStateChangeSet::payload_json() const {
-    std::ostringstream os;
-    os << "{\"changed\":[";
-    bool first = true;
-    auto append = [&](const char *name, bool enabled) {
-        if (!enabled) return;
-        if (!first) os << ',';
-        os << '"' << name << '"';
-        first = false;
-    };
-    append("eth", eth);
-    append("wifi", wifi);
-    append("route", route);
-    append("dns", dns);
-    os << "]}";
-    return os.str();
 }
 
 NetworkStateChangeSet NetworkStateChangeDetector::observe(
