@@ -13,7 +13,9 @@ option(NETWORK_SERVICE_BUILD_RC_PROBE
 add_executable(${NETWORK_SERVICE_TARGET}
     src/main.cpp
     src/service/network_control_plane.cpp
+    src/service/network_control_plane_reconcile.cpp
     src/service/network_daemon.cpp
+    src/service/network_daemon_events.cpp
     src/service/network_state.cpp
     src/service/network_state_change_detector.cpp
     src/service/wifi_manager.cpp
@@ -27,6 +29,7 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/ipc/network_ipc_v1_session.cpp
     src/platform/dhcp_lease_store.cpp
     src/platform/interface_snapshot.cpp
+    src/platform/netlink_monitor.cpp
     src/platform/network_configurator.cpp
     src/config/ethernet_config.cpp
     src/platform/udhcpc_process.cpp
@@ -175,6 +178,15 @@ if(BUILD_TESTING)
     )
     add_test(NAME udhcpc_process COMMAND udhcpc_process_test)
 
+    add_executable(netlink_monitor_test
+        tests/netlink_monitor_test.cpp
+        src/platform/netlink_monitor.cpp
+    )
+    target_include_directories(netlink_monitor_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME netlink_monitor COMMAND netlink_monitor_test)
+
     add_executable(wpa_ctrl_client_test
         tests/wpa_ctrl_client_test.cpp
         src/platform/wpa_ctrl_client.cpp
@@ -198,7 +210,9 @@ if(BUILD_TESTING)
     add_executable(network_state_event_integration_test
         tests/network_state_event_integration_test.cpp
         src/service/network_control_plane.cpp
+        src/service/network_control_plane_reconcile.cpp
         src/service/network_daemon.cpp
+        src/service/network_daemon_events.cpp
         src/service/network_state.cpp
         src/service/network_state_change_detector.cpp
         src/service/wifi_manager.cpp
@@ -212,6 +226,7 @@ if(BUILD_TESTING)
         src/ipc/network_ipc_v1_session.cpp
         src/platform/dhcp_lease_store.cpp
         src/platform/interface_snapshot.cpp
+        src/platform/netlink_monitor.cpp
         src/platform/network_configurator.cpp
         src/config/ethernet_config.cpp
         src/platform/udhcpc_process.cpp
@@ -235,7 +250,9 @@ if(BUILD_TESTING)
     add_executable(network_service_e2e_fixture
         tests/network_service_e2e_fixture_main.cpp
         src/service/network_control_plane.cpp
+        src/service/network_control_plane_reconcile.cpp
         src/service/network_daemon.cpp
+        src/service/network_daemon_events.cpp
         src/service/network_state.cpp
         src/service/network_state_change_detector.cpp
         src/service/wifi_manager.cpp
@@ -249,6 +266,7 @@ if(BUILD_TESTING)
         src/ipc/network_ipc_v1_session.cpp
         src/platform/dhcp_lease_store.cpp
         src/platform/interface_snapshot.cpp
+        src/platform/netlink_monitor.cpp
         src/platform/network_configurator.cpp
         src/config/ethernet_config.cpp
         src/platform/udhcpc_process.cpp

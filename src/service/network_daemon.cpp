@@ -1,5 +1,6 @@
 #include "service/network_daemon.h"
 
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -11,6 +12,7 @@
 #include "config/ethernet_config.h"
 #include "platform/dhcp_lease_store.h"
 #include "platform/interface_snapshot.h"
+#include "platform/netlink_monitor.h"
 #include "platform/network_configurator.h"
 #include "platform/udhcpc_process.h"
 #include "platform/wifi_backend.h"
@@ -136,8 +138,10 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
     ops.clear_dns = [](std::string &error) {
         return NetworkConfigurator::clear_dns(error);
     };
+    // ControlPlane policy needs raw external route/DNS facts, not a normalized
+    // Service snapshot that would re-enter WifiManager while its lock is held.
     ops.snapshot = [this]() {
-        return snapshot();
+        return read_live_snapshot(eth_iface_.c_str(), wifi_iface_.c_str());
     };
 
     control_plane_.reset(new NetworkControlPlane(eth_iface_, wifi_iface_, std::move(ops)));
@@ -181,6 +185,18 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
             markers.failed_sequence = events.last_scan_failed_sequence;
             return markers;
         }));
+
+    // Deterministic fixture construction intentionally disables host Netlink so
+    // external machine activity cannot perturb contract-test event sequencing.
+    if (!snapshot_provider_) {
+        netlink_monitor_.reset(new NetlinkMonitor());
+        std::string netlink_error;
+        if (!netlink_monitor_->open(netlink_error)) {
+            std::cerr << "network_service: NETLINK_MONITOR_UNAVAILABLE error="
+                      << netlink_error << std::endl;
+            netlink_monitor_.reset();
+        }
+    }
 }
 
 NetworkDaemon::~NetworkDaemon() = default;
@@ -191,6 +207,27 @@ bool NetworkDaemon::reconcile(std::string &error) {
         return false;
     }
     return control_plane_->reconcile(error);
+}
+
+bool NetworkDaemon::refresh_external_state(std::string &error) {
+    if (!control_plane_) {
+        error = "network control plane unavailable";
+        return false;
+    }
+    return control_plane_->refresh_external_state(error);
+}
+
+int NetworkDaemon::network_event_fd() const {
+    return netlink_monitor_ ? netlink_monitor_->fd() : -1;
+}
+
+bool NetworkDaemon::consume_network_events(bool &changed, std::string &error) {
+    changed = false;
+    error.clear();
+    if (!netlink_monitor_) return true;
+    if (!netlink_monitor_->drain(changed, error)) return false;
+    if (!changed) return true;
+    return refresh_external_state(error);
 }
 
 NetworkSnapshot NetworkDaemon::snapshot() const {

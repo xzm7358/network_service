@@ -37,7 +37,8 @@ using Clock = std::chrono::steady_clock;
 
 static int g_wake_fd = -1;
 constexpr int kClientHandshakeIdleTimeoutMs = 1000;
-constexpr int kStateObservationIntervalMs = 250;
+constexpr int kLeaseReconcileIntervalMs = 250;
+constexpr int kFallbackStateObservationIntervalMs = 30 * 1000;
 constexpr size_t kMaxRequestBytes = 64 * 1024;
 constexpr std::size_t kMaxActiveClients = 8;
 constexpr std::size_t kReadBudgetPerTick = 16 * 1024;
@@ -257,8 +258,11 @@ void NetworkIpcServer::run() {
     std::vector<std::unique_ptr<ClientState>> clients;
     NetworkStateChangeDetector state_detector;
     (void)state_detector.observe(daemon_.snapshot());
-    Clock::time_point next_state_observation =
-        Clock::now() + std::chrono::milliseconds(kStateObservationIntervalMs);
+    const Clock::time_point start = Clock::now();
+    Clock::time_point next_lease_reconcile =
+        start + std::chrono::milliseconds(kLeaseReconcileIntervalMs);
+    Clock::time_point next_fallback_observation =
+        start + std::chrono::milliseconds(kFallbackStateObservationIntervalMs);
 
     auto close_client = [](ClientState &client) {
         if (client.fd >= 0) {
@@ -328,24 +332,55 @@ void NetworkIpcServer::run() {
         return true;
     };
 
-    auto observe_state_if_due = [&]() {
-        const Clock::time_point now = Clock::now();
-        if (now < next_state_observation) return;
-        next_state_observation =
-            now + std::chrono::milliseconds(kStateObservationIntervalMs);
-
-        std::string reconcile_error;
-        if (!daemon_.reconcile(reconcile_error)) {
-            std::cerr << "network_service: NETWORK_RECONCILE_FAILED error="
-                      << reconcile_error << std::endl;
-        }
-
+    auto observe_state = [&]() {
         const NetworkStateChangeSet changes = state_detector.observe(daemon_.snapshot());
         if (!changes.any()) return;
         if (!broadcast_event("network.state.changed", changes.payload_json())) {
             std::cerr << "network_service: IPC_V1_STATE_EVENT_ALLOCATION_FAILED"
                       << std::endl;
         }
+    };
+
+    auto reconcile_if_due = [&]() {
+        const Clock::time_point now = Clock::now();
+        if (now < next_lease_reconcile) return;
+        next_lease_reconcile =
+            now + std::chrono::milliseconds(kLeaseReconcileIntervalMs);
+
+        bool lease_changed = false;
+        std::string reconcile_error;
+        if (!daemon_.reconcile(lease_changed, reconcile_error)) {
+            std::cerr << "network_service: NETWORK_RECONCILE_FAILED error="
+                      << reconcile_error << std::endl;
+        }
+
+        const bool runtime_dirty = daemon_.consume_runtime_state_dirty();
+        if (lease_changed || runtime_dirty) observe_state();
+    };
+
+    auto fallback_observation_if_due = [&]() {
+        const Clock::time_point now = Clock::now();
+        if (now < next_fallback_observation) return;
+        next_fallback_observation =
+            now + std::chrono::milliseconds(kFallbackStateObservationIntervalMs);
+
+        std::string refresh_error;
+        if (!daemon_.refresh_external_state(refresh_error)) {
+            std::cerr << "network_service: NETWORK_EXTERNAL_REFRESH_FAILED error="
+                      << refresh_error << std::endl;
+        }
+        observe_state();
+    };
+
+    auto consume_network_events = [&]() {
+        bool changed = false;
+        std::string event_error;
+        if (!daemon_.consume_network_events(changed, event_error)) {
+            std::cerr << "network_service: NETWORK_EVENT_CONSUME_FAILED error="
+                      << event_error << std::endl;
+            return;
+        }
+        if (changed) observe_state();
     };
 
     auto flush_client = [&](ClientState &client) {
@@ -632,12 +667,14 @@ void NetworkIpcServer::run() {
                     std::chrono::milliseconds(ipc_v1::kDefaultWriteStallTimeoutMs));
             }
         }
-        include_deadline(next_state_observation);
+        include_deadline(next_lease_reconcile);
+        include_deadline(next_fallback_observation);
         return timeout;
     };
 
     while (running_) {
-        observe_state_if_due();
+        reconcile_if_due();
+        fallback_observation_if_due();
         for (auto &entry : clients) {
             service_buffered_v1(*entry);
             if (!entry->outbound.empty()) flush_client(*entry);
@@ -649,7 +686,7 @@ void NetworkIpcServer::run() {
 
         std::vector<struct pollfd> fds;
         std::vector<ClientState *> polled_clients;
-        fds.reserve(2 + clients.size());
+        fds.reserve(3 + clients.size());
         polled_clients.reserve(clients.size());
 
         struct pollfd listen_poll;
@@ -668,6 +705,18 @@ void NetworkIpcServer::run() {
             fds.push_back(wake_poll);
         }
 
+        std::size_t network_event_index = static_cast<std::size_t>(-1);
+        const int network_event_fd = daemon_.network_event_fd();
+        if (network_event_fd >= 0) {
+            network_event_index = fds.size();
+            struct pollfd network_poll;
+            network_poll.fd = network_event_fd;
+            network_poll.events = POLLIN;
+            network_poll.revents = 0;
+            fds.push_back(network_poll);
+        }
+
+        const std::size_t client_poll_offset = fds.size();
         for (auto &entry : clients) {
             ClientState &client = *entry;
             struct pollfd client_poll;
@@ -697,6 +746,12 @@ void NetworkIpcServer::run() {
             while (read(wake_read_fd_, drain, sizeof(drain)) > 0) {}
             running_ = false;
             break;
+        }
+
+        if (network_event_index != static_cast<std::size_t>(-1) &&
+            (fds[network_event_index].revents &
+             (POLLIN | POLLERR | POLLHUP | POLLNVAL))) {
+            consume_network_events();
         }
 
         if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
@@ -735,8 +790,6 @@ void NetworkIpcServer::run() {
             }
         }
 
-        const std::size_t client_poll_offset =
-            wake_index == static_cast<std::size_t>(-1) ? 1 : 2;
         for (std::size_t i = 0; i < polled_clients.size(); ++i) {
             ClientState &client = *polled_clients[i];
             if (client.closed) continue;
