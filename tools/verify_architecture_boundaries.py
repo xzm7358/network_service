@@ -18,8 +18,14 @@ DHCP_CALLBACK_FORBIDDEN = [
     r"\broute\s+(?:add|del)\b",
     r"/etc/resolv\.conf",
 ]
+PLATFORM_TRUTH_FORBIDDEN = [
+    r"\.connected\s*=\s*[^;]*has_ip",
+    r"\.online\s*=",
+    r"\.network_ready\s*=",
+]
 DIAG = "PRODUCT_ARCHITECTURE_MECHANISM_LEAK"
 DHCP_DIAG = "PRODUCT_DHCP_CALLBACK_POLICY_LEAK"
+TRUTH_DIAG = "PRODUCT_PLATFORM_TRUTH_DERIVATION_LEAK"
 
 
 def scan_text(path: Path, text: str, patterns=MECHANISMS):
@@ -50,6 +56,15 @@ def scan(root=ROOT):
             DHCP_CALLBACK_FORBIDDEN,
         ):
             findings.append((DHCP_DIAG, *finding))
+
+    platform_snapshot = root / "src/platform/interface_snapshot.cpp"
+    if platform_snapshot.exists():
+        for finding in scan_text(
+            platform_snapshot,
+            platform_snapshot.read_text(errors="replace"),
+            PLATFORM_TRUTH_FORBIDDEN,
+        ):
+            findings.append((TRUTH_DIAG, *finding))
     return findings
 
 
@@ -70,6 +85,21 @@ def self_test():
         Path("udhcpc_process.cpp"),
         'f << "printf lease fact";',
         DHCP_CALLBACK_FORBIDDEN,
+    )
+    assert scan_text(
+        Path("interface_snapshot.cpp"),
+        "snapshot.wifi.connected = snapshot.wifi.has_ip;",
+        PLATFORM_TRUTH_FORBIDDEN,
+    )
+    assert scan_text(
+        Path("interface_snapshot.cpp"),
+        "snapshot.online = snapshot.dns_available;",
+        PLATFORM_TRUTH_FORBIDDEN,
+    )
+    assert not scan_text(
+        Path("interface_snapshot.cpp"),
+        "snapshot.dns_available = !snapshot.dns4.empty();",
+        PLATFORM_TRUTH_FORBIDDEN,
     )
 
 
