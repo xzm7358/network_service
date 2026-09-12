@@ -103,6 +103,38 @@ void test_snapshot_payload_projects_policy() {
             "snapshot primary interface projection changed");
 }
 
+void test_wpa_events_view_payload() {
+    network_service::WpaEventsView view;
+    view.attached = true;
+    view.connected = true;
+    view.dhcp_requested = true;
+    view.has_ip = true;
+    view.has_default_route = true;
+    view.dns_available = true;
+    view.ip4 = "192.168.1.20";
+    view.gateway4 = "192.168.1.1";
+    view.dns4 = "1.1.1.1";
+    view.connect_events = 2;
+    view.dhcp_requests = 2;
+    view.event_sequence = 9;
+    view.wifi_state = "connected";
+    view.last_ssid = "Home";
+    view.last_bssid = "aa:bb:cc:dd:ee:ff";
+
+    const std::string payload =
+        network_service::ipc_representation::wpa_events_payload(view);
+    require(payload.find("\"attached\":true,\"connected\":true") != std::string::npos,
+            "WPA attached/connected shape changed");
+    require(payload.find("\"dhcp_requested\":true") != std::string::npos,
+            "WPA DHCP projection changed");
+    require(payload.find("\"ip4\":\"192.168.1.20\"") != std::string::npos,
+            "WPA IP projection changed");
+    require(payload.find("\"wifi_state\":\"connected\"") != std::string::npos,
+            "WPA legacy state projection changed");
+    require(payload.find("\"last_ssid\":\"Home\"") != std::string::npos,
+            "WPA SSID projection changed");
+}
+
 void test_wifi_scan_and_saved_payloads() {
     network_service::WifiApRecord ap;
     ap.bssid = "aa:bb:cc:dd:ee:ff";
@@ -140,6 +172,7 @@ int main() {
         test_wifi_command_payloads();
         test_ethernet_config_payload();
         test_snapshot_payload_projects_policy();
+        test_wpa_events_view_payload();
         test_wifi_scan_and_saved_payloads();
         std::cout << "IPC representation contract tests passed\n";
         return 0;
