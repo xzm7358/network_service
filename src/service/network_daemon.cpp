@@ -29,7 +29,7 @@ static WifiRuntimeFact make_wifi_runtime_fact(const WpaEventFact &events,
                                               const WifiManagerState &manager) {
     WifiRuntimeFact fact;
     fact.l2_state = events.l2_state;
-    fact.dhcp_requested = manager.dhcp_requested;
+    fact.dhcp_state = manager.dhcp_state;
     fact.failure_reason = !manager.failure_reason.empty()
                               ? manager.failure_reason
                               : events.failure_reason;
@@ -44,7 +44,7 @@ static WpaEventsView project_wpa_compatibility(const WpaEventFact &events,
     view.attached = events.attached;
     view.connected = truth.wifi.connected;
     view.disconnected = runtime.l2_state == WifiL2State::Disconnected;
-    view.dhcp_requested = manager.dhcp_requested;
+    view.dhcp_requested = dhcp_client_active(manager.dhcp_state);
     view.has_ip = truth.wifi.has_ip;
     view.has_default_route = truth.wifi.has_default_route;
     view.dns_available = truth.dns_available;
@@ -141,6 +141,9 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
         },
         [this]() {
             if (control_plane_) control_plane_->stop_dhcp(wifi_iface_);
+        },
+        [this]() {
+            return UdhcpcProcess::is_running(wifi_iface_);
         }));
 
     WifiProfilePolicyOps profile_ops;
@@ -223,6 +226,7 @@ bool NetworkDaemon::reconcile(std::string &error) {
         error = "network control plane unavailable";
         return false;
     }
+    if (wifi_manager_) (void)wifi_manager_->reconcile_dhcp_process();
     return control_plane_->reconcile(error);
 }
 
