@@ -4,14 +4,27 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MECHANISMS = [r"\bwpa_cli\b", r"\budhcpc\b", r"\bifconfig\b", r"\broute\s+(?:add|del)\b", r"/etc/resolv\.conf", r"\bsystem\s*\(", r"\bpopen\s*\("]
-HIGH_LEVEL = [ROOT / "src/service", ROOT / "src/ipc"]
+MECHANISMS = [
+    r"\bwpa_cli\b",
+    r"\budhcpc\b",
+    r"\bifconfig\b",
+    r"\broute\s+(?:add|del)\b",
+    r"/etc/resolv\.conf",
+    r"\bsystem\s*\(",
+    r"\bpopen\s*\(",
+]
+DHCP_CALLBACK_FORBIDDEN = [
+    r"\bifconfig\b",
+    r"\broute\s+(?:add|del)\b",
+    r"/etc/resolv\.conf",
+]
 DIAG = "PRODUCT_ARCHITECTURE_MECHANISM_LEAK"
+DHCP_DIAG = "PRODUCT_DHCP_CALLBACK_POLICY_LEAK"
 
 
-def scan_text(path: Path, text: str):
+def scan_text(path: Path, text: str, patterns=MECHANISMS):
     findings = []
-    for pattern in MECHANISMS:
+    for pattern in patterns:
         rx = re.compile(pattern)
         for lineno, line in enumerate(text.splitlines(), 1):
             if rx.search(line):
@@ -26,13 +39,38 @@ def scan(root=ROOT):
             continue
         for path in base.rglob("*"):
             if path.suffix in {".cpp", ".cc", ".c", ".h", ".hpp"}:
-                findings.extend(scan_text(path, path.read_text(errors="replace")))
+                for finding in scan_text(path, path.read_text(errors="replace")):
+                    findings.append((DIAG, *finding))
+
+    callback = root / "src/platform/udhcpc_process.cpp"
+    if callback.exists():
+        for finding in scan_text(
+            callback,
+            callback.read_text(errors="replace"),
+            DHCP_CALLBACK_FORBIDDEN,
+        ):
+            findings.append((DHCP_DIAG, *finding))
     return findings
 
 
 def self_test():
     assert scan_text(Path("bad.cpp"), 'system("wpa_cli -i wlan0 scan");')
     assert not scan_text(Path("good.cpp"), 'return wifi_scan(iface, error);')
+    assert scan_text(
+        Path("udhcpc_process.cpp"),
+        'f << "route add default";',
+        DHCP_CALLBACK_FORBIDDEN,
+    )
+    assert scan_text(
+        Path("udhcpc_process.cpp"),
+        'f << ": > /etc/resolv.conf";',
+        DHCP_CALLBACK_FORBIDDEN,
+    )
+    assert not scan_text(
+        Path("udhcpc_process.cpp"),
+        'f << "printf lease fact";',
+        DHCP_CALLBACK_FORBIDDEN,
+    )
 
 
 def main():
@@ -42,12 +80,12 @@ def main():
         return 0
     findings = scan()
     if findings:
-        for path, line, pattern, evidence in findings:
+        for diag, path, line, pattern, evidence in findings:
             try:
                 rel = path.relative_to(ROOT)
             except ValueError:
                 rel = path
-            print(f"{DIAG}: {rel}:{line}: {evidence}", file=sys.stderr)
+            print(f"{diag}: {rel}:{line}: {evidence}", file=sys.stderr)
         return 1
     print("NetworkService architecture boundary: PASS")
     return 0
