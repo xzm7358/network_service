@@ -200,7 +200,10 @@ bool NetworkControlPlane::reconcile(std::string &error) {
     bool wifi_changed = false;
     if (!reconcile_link_locked(eth_iface_, eth_, eth_changed, error)) return false;
     if (!reconcile_link_locked(wifi_iface_, wifi_, wifi_changed, error)) return false;
-    if (!eth_changed && !wifi_changed) return true;
+
+    // Preserve the historical full-reconcile API: callers that explicitly ask
+    // for reconciliation also refresh externally-managed Ethernet/DNS state.
+    // The 250 ms reactor fast path uses the changed-aware overload instead.
     return recompute_dns_locked(error);
 }
 
