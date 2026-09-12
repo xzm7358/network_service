@@ -157,7 +157,6 @@ bool NetworkControlPlane::reconcile_link_locked(const std::string &iface,
         }
         state.active = false;
         state.lease = fact;
-        if (!recompute_dns_locked(error)) return false;
         state.fingerprint = fingerprint;
         return true;
     }
@@ -186,7 +185,6 @@ bool NetworkControlPlane::reconcile_link_locked(const std::string &iface,
 
     state.active = true;
     state.lease = fact;
-    if (!recompute_dns_locked(error)) return false;
     state.fingerprint = fingerprint;
     return true;
 }
@@ -196,7 +194,7 @@ bool NetworkControlPlane::reconcile(std::string &error) {
     error.clear();
     if (!reconcile_link_locked(eth_iface_, eth_, error)) return false;
     if (!reconcile_link_locked(wifi_iface_, wifi_, error)) return false;
-    return true;
+    return recompute_dns_locked(error);
 }
 
 bool NetworkControlPlane::apply_routes_locked(std::string &error) {
@@ -333,7 +331,12 @@ bool NetworkControlPlane::set_route_policy(RoutePolicy policy, std::string &erro
     const RoutePolicy previous = route_policy_;
     route_policy_ = policy;
     if (!apply_routes_locked(error) || !recompute_dns_locked(error)) {
+        const std::string failure = error;
         route_policy_ = previous;
+        std::string rollback_error;
+        (void)apply_routes_locked(rollback_error);
+        (void)recompute_dns_locked(rollback_error);
+        error = failure;
         return false;
     }
     return true;
