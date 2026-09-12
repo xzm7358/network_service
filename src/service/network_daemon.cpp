@@ -8,11 +8,13 @@
 #define NETWORK_SERVICE_VERSION "0.1.0"
 #endif
 
+#include "config/ethernet_config.h"
 #include "platform/dhcp_lease_store.h"
 #include "platform/interface_snapshot.h"
 #include "platform/netlink_monitor.h"
 #include "platform/network_configurator.h"
 #include "platform/udhcpc_process.h"
+#include "platform/wifi_backend.h"
 #include "platform/wpa_event_monitor.h"
 #include "service/network_control_plane.h"
 #include "service/network_state.h"
