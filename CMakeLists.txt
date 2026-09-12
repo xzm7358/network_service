@@ -50,6 +50,7 @@ add_library(network_service_service STATIC
     src/service/network_state.cpp
     src/service/network_state_change_detector.cpp
     src/service/wifi_manager.cpp
+    src/service/wifi_profile_policy.cpp
     src/service/wifi_scan_lifecycle.cpp
 )
 target_link_libraries(network_service_service
@@ -151,6 +152,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(wifi_manager_test PRIVATE NetworkService::Service)
     add_test(NAME wifi_manager COMMAND wifi_manager_test)
+
+    add_executable(wifi_profile_policy_test
+        tests/wifi_profile_policy_test.cpp
+    )
+    target_link_libraries(wifi_profile_policy_test PRIVATE NetworkService::Service)
+    add_test(NAME wifi_profile_policy COMMAND wifi_profile_policy_test)
 
     add_executable(network_control_plane_test
         tests/network_control_plane_test.cpp

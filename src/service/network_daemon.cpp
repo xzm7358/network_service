@@ -17,6 +17,7 @@
 #include "service/network_control_plane.h"
 #include "service/network_state.h"
 #include "service/wifi_manager.h"
+#include "service/wifi_profile_policy.h"
 
 namespace network_service {
 
@@ -139,6 +140,39 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
         [this]() {
             if (control_plane_) control_plane_->stop_dhcp(wifi_iface_);
         }));
+
+    WifiProfilePolicyOps profile_ops;
+    profile_ops.ensure_interface_up = [this](std::string &error) {
+        return network_service::wifi_ensure_interface_up(wifi_iface_, error);
+    };
+    profile_ops.create_profile = [this](const std::string &ssid,
+                                        const std::string &password,
+                                        std::string &error) {
+        return network_service::wifi_create_profile(wifi_iface_, ssid, password, error);
+    };
+    profile_ops.find_profile = [this](const std::string &ssid, std::string &error) {
+        return network_service::wifi_find_profile(wifi_iface_, ssid, error);
+    };
+    profile_ops.disable_all_profiles = [this](std::string &error) {
+        return network_service::wifi_disable_all_profiles(wifi_iface_, error);
+    };
+    profile_ops.set_profile_enabled = [this](int network_id,
+                                             bool enabled,
+                                             std::string &error) {
+        return network_service::wifi_set_profile_enabled(
+            wifi_iface_, network_id, enabled, error);
+    };
+    profile_ops.select_profile = [this](int network_id, std::string &error) {
+        return network_service::wifi_select_profile(wifi_iface_, network_id, error);
+    };
+    profile_ops.remove_profile = [this](int network_id, std::string &error) {
+        return network_service::wifi_remove_profile(wifi_iface_, network_id, error);
+    };
+    profile_ops.save_profiles = [this](std::string &error) {
+        return network_service::wifi_save_profiles(wifi_iface_, error);
+    };
+    wifi_profile_policy_.reset(new WifiProfilePolicy(std::move(profile_ops)));
+
     wpa_monitor_.reset(new WpaEventMonitor(
         wifi_iface_,
         std::move(event_dir),
@@ -355,8 +389,12 @@ NetworkOperationResult<WifiEnabledResult> NetworkDaemon::wifi_set_enabled(bool e
 NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_connect(
     const std::string &ssid,
     const std::string &password) const {
+    if (!wifi_profile_policy_) {
+        return NetworkOperationResult<WifiCommandResult>::failure(
+            500, "Wi-Fi profile policy unavailable");
+    }
     std::string error;
-    if (!network_service::wifi_connect(wifi_iface_, ssid, password, error)) {
+    if (!wifi_profile_policy_->connect_new(ssid, password, error)) {
         return NetworkOperationResult<WifiCommandResult>::failure(500, std::move(error));
     }
     return NetworkOperationResult<WifiCommandResult>::success(command_result("connect"));
@@ -364,8 +402,12 @@ NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_connect(
 
 NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_connect_saved(
     const std::string &ssid) const {
+    if (!wifi_profile_policy_) {
+        return NetworkOperationResult<WifiCommandResult>::failure(
+            500, "Wi-Fi profile policy unavailable");
+    }
     std::string error;
-    if (!network_service::wifi_connect_saved(wifi_iface_, ssid, error)) {
+    if (!wifi_profile_policy_->connect_saved(ssid, error)) {
         return NetworkOperationResult<WifiCommandResult>::failure(500, std::move(error));
     }
     return NetworkOperationResult<WifiCommandResult>::success(command_result("connect_saved"));
@@ -384,8 +426,12 @@ NetworkOperationResult<std::vector<WifiSavedNetwork>> NetworkDaemon::wifi_list_s
 
 NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_forget(
     const std::string &ssid) const {
+    if (!wifi_profile_policy_) {
+        return NetworkOperationResult<WifiCommandResult>::failure(
+            500, "Wi-Fi profile policy unavailable");
+    }
     std::string error;
-    if (!network_service::wifi_forget_saved(wifi_iface_, ssid, error)) {
+    if (!wifi_profile_policy_->forget(ssid, error)) {
         return NetworkOperationResult<WifiCommandResult>::failure(500, std::move(error));
     }
     return NetworkOperationResult<WifiCommandResult>::success(command_result("forget"));
@@ -394,8 +440,12 @@ NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_forget(
 NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_set_autoconnect(
     const std::string &ssid,
     bool enabled) const {
+    if (!wifi_profile_policy_) {
+        return NetworkOperationResult<WifiCommandResult>::failure(
+            500, "Wi-Fi profile policy unavailable");
+    }
     std::string error;
-    if (!network_service::wifi_set_autoconnect(wifi_iface_, ssid, enabled, error)) {
+    if (!wifi_profile_policy_->set_autoconnect(ssid, enabled, error)) {
         return NetworkOperationResult<WifiCommandResult>::failure(500, std::move(error));
     }
     WifiCommandResult result = command_result("autoconnect");

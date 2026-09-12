@@ -20,6 +20,7 @@ namespace network_service {
 class NetlinkMonitor;
 class NetworkControlPlane;
 class WifiManager;
+class WifiProfilePolicy;
 class WpaEventMonitor;
 
 class NetworkDaemon {
@@ -70,6 +71,7 @@ private:
     SnapshotProvider snapshot_provider_;
     std::unique_ptr<NetworkControlPlane> control_plane_;
     std::unique_ptr<WifiManager> wifi_manager_;
+    std::unique_ptr<WifiProfilePolicy> wifi_profile_policy_;
     std::unique_ptr<WpaEventMonitor> wpa_monitor_;
     std::unique_ptr<WifiScanLifecycle> wifi_scan_lifecycle_;
     std::unique_ptr<NetlinkMonitor> netlink_monitor_;
