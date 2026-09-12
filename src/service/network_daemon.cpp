@@ -160,8 +160,11 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
                                std::string &error) {
         return NetworkConfigurator::set_default_route(iface, gateway4, metric, error);
     };
-    ops.clear_default_route = [](const std::string &iface) {
-        NetworkConfigurator::clear_default_route(iface);
+    ops.clear_default_route = [](const std::string &iface,
+                                 const std::string &gateway4,
+                                 int metric,
+                                 std::string &error) {
+        return NetworkConfigurator::clear_default_route(iface, gateway4, metric, error);
     };
     ops.set_dns = [](const std::string &dns4, std::string &error) {
         return NetworkConfigurator::set_primary_dns(dns4, error);
