@@ -14,6 +14,7 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/main.cpp
     src/service/network_control_plane.cpp
     src/service/network_daemon.cpp
+    src/service/network_state.cpp
     src/service/network_state_change_detector.cpp
     src/service/wifi_manager.cpp
     src/service/wifi_scan_lifecycle.cpp
@@ -145,6 +146,16 @@ if(BUILD_TESTING)
     target_link_libraries(network_control_plane_test PRIVATE pthread)
     add_test(NAME network_control_plane COMMAND network_control_plane_test)
 
+    add_executable(network_state_test
+        tests/network_state_test.cpp
+        src/service/network_state.cpp
+    )
+    target_include_directories(network_state_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME network_state COMMAND network_state_test)
+
     add_executable(dhcp_lease_store_test
         tests/dhcp_lease_store_test.cpp
         src/platform/dhcp_lease_store.cpp
@@ -188,6 +199,7 @@ if(BUILD_TESTING)
         tests/network_state_event_integration_test.cpp
         src/service/network_control_plane.cpp
         src/service/network_daemon.cpp
+        src/service/network_state.cpp
         src/service/network_state_change_detector.cpp
         src/service/wifi_manager.cpp
         src/service/wifi_scan_lifecycle.cpp
@@ -224,6 +236,7 @@ if(BUILD_TESTING)
         tests/network_service_e2e_fixture_main.cpp
         src/service/network_control_plane.cpp
         src/service/network_daemon.cpp
+        src/service/network_state.cpp
         src/service/network_state_change_detector.cpp
         src/service/wifi_manager.cpp
         src/service/wifi_scan_lifecycle.cpp
