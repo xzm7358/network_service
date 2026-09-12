@@ -16,6 +16,7 @@
 #include "platform/wifi_backend.h"
 #include "platform/wpa_event_monitor.h"
 #include "service/network_control_plane.h"
+#include "service/network_state.h"
 #include "service/wifi_manager.h"
 #include "service/wifi_scan_lifecycle.h"
 
@@ -49,33 +50,38 @@ static std::string error_json(int status, const std::string &message) {
     return os.str();
 }
 
-static void overlay_wpa_with_runtime_state(WpaEventSnapshot &events,
-                                           const NetworkSnapshot &live,
-                                           const WifiManagerState &manager) {
+static WifiRuntimeFact make_wifi_runtime_fact(const WpaEventSnapshot &events,
+                                              const WifiManagerState &manager) {
+    WifiRuntimeFact fact;
+    fact.l2_state = events.l2_state;
+    fact.dhcp_requested = manager.dhcp_requested;
+    fact.failure_reason = !manager.failure_reason.empty()
+                              ? manager.failure_reason
+                              : events.failure_reason;
+    return fact;
+}
+
+static void project_wpa_compatibility(WpaEventSnapshot &events,
+                                      const NetworkSnapshot &truth,
+                                      const WifiManagerState &manager) {
+    const WifiRuntimeFact runtime = make_wifi_runtime_fact(events, manager);
+
+    events.connected = truth.wifi.connected;
+    events.disconnected = runtime.l2_state == WifiL2State::Disconnected;
     events.dhcp_requested = manager.dhcp_requested;
     events.dhcp_requests = manager.dhcp_requests;
-    if (!manager.failure_reason.empty()) {
-        events.wifi_state = "failed";
-        events.failure_reason = manager.failure_reason;
-    }
+    events.has_ip = truth.wifi.has_ip;
+    events.has_default_route = truth.wifi.has_default_route;
+    events.dns_available = truth.dns_available;
+    events.ip4 = truth.wifi.ip4;
+    events.gateway4 = truth.wifi.gateway4;
+    events.dns4 = truth.dns4;
+    events.wifi_state = legacy_wifi_state(truth, runtime);
 
-    events.has_ip = live.wifi.has_ip;
-    events.has_default_route = live.wifi.has_default_route;
-    events.dns_available = live.dns_available;
-    events.ip4 = live.wifi.ip4;
-    events.gateway4 = live.wifi.gateway4;
-    events.dns4 = live.dns4;
-
-    if (events.connected && live.wifi.has_ip && live.wifi.has_default_route && live.dns_available) {
-        events.wifi_state = "connected";
-        events.disconnected = false;
-        events.dhcp_requested = true;
+    if (!runtime.failure_reason.empty()) {
+        events.failure_reason = runtime.failure_reason;
+    } else if (runtime.l2_state != WifiL2State::Failed) {
         events.failure_reason.clear();
-        return;
-    }
-
-    if (events.connected && events.wifi_state == "connected") {
-        events.wifi_state = "ip_configuring";
     }
 }
 
@@ -189,7 +195,15 @@ bool NetworkDaemon::reconcile(std::string &error) {
 
 NetworkSnapshot NetworkDaemon::snapshot() const {
     if (snapshot_provider_) return snapshot_provider_();
-    return read_live_snapshot(eth_iface_.c_str(), wifi_iface_.c_str());
+
+    NetworkSnapshot truth = read_live_snapshot(eth_iface_.c_str(), wifi_iface_.c_str());
+    WpaEventSnapshot events;
+    WifiManagerState manager;
+    if (wpa_monitor_) events = wpa_monitor_->snapshot();
+    if (wifi_manager_) manager = wifi_manager_->state();
+
+    normalize_network_snapshot(truth, make_wifi_runtime_fact(events, manager));
+    return truth;
 }
 
 std::string NetworkDaemon::snapshot_result_json() const {
@@ -216,7 +230,7 @@ std::string NetworkDaemon::wpa_events_json() const {
     WpaEventSnapshot events = wpa_monitor_->snapshot();
     WifiManagerState manager;
     if (wifi_manager_) manager = wifi_manager_->state();
-    overlay_wpa_with_runtime_state(events, snapshot(), manager);
+    project_wpa_compatibility(events, snapshot(), manager);
     return ok_json(wpa_event_snapshot_to_json(events));
 }
 

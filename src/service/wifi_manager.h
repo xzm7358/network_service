@@ -31,8 +31,16 @@ public:
 private:
     DhcpStartFn dhcp_start_;
     DhcpStopFn dhcp_stop_;
+
+    // lock_ protects state only. External DHCP callbacks are never invoked while
+    // holding it, so ControlPlane reconciliation may safely read manager state.
     mutable std::mutex lock_;
     WifiManagerState state_;
+
+    // Serializes start/stop mechanism calls without participating in the state
+    // lock order. This prevents concurrent CONNECTED/DISCONNECTED operations
+    // from spawning or leaving duplicate DHCP client instances.
+    std::mutex operation_lock_;
 };
 
 } // namespace network_service
