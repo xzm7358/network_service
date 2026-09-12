@@ -15,8 +15,10 @@ namespace network_service {
 struct WpaEventSnapshot {
     bool attached = false;
 
-    // L2 truth owned by the supplicant monitor.
+    // L2 truth owned by the supplicant monitor. Scan is deliberately separate:
+    // a connected station may perform background scans without losing L2.
     WifiL2State l2_state = WifiL2State::Unknown;
+    bool scan_active = false;
 
     // Legacy compatibility fields retained for wpa.events serialization.
     bool connected = false;
