@@ -32,6 +32,8 @@ jobs:
         run: python3 tests/ssd20x_rc_evidence_validator_test.py
       - name: Validate BusyBox collector syntax
         run: sh -n tools/rc/ssd20x_collect.sh
+      - name: Validate target init script syntax
+        run: sh -n packaging/S40network_service
 
   strict-host-build:
     runs-on: ubuntu-latest
@@ -46,6 +48,10 @@ jobs:
         run: cmake --build build/strict --parallel 2
       - name: IPC v1 and state EVENT contracts
         run: ctest --test-dir build/strict --output-on-failure
+      - name: NetworkService singleton ownership regression
+        run: >-
+          python3 tests/network_service_singleton_test.py
+          --binary ./app/smartcontrol/dnake/bin/network_service
       - name: RC probe against real server fixture
         run: >-
           python3 tests/network_service_rc_probe_test.py
