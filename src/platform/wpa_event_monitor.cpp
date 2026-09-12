@@ -1,18 +1,14 @@
 #include "platform/wpa_event_monitor.h"
 
 #include <cerrno>
-#include <cstdio>
-#include <cstring>
 #include <iostream>
 #include <poll.h>
 #include <sstream>
 #include <utility>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 #include "platform/wifi_backend.h"
+#include "platform/wpa_ctrl_client.h"
 
 namespace network_service {
 
@@ -34,10 +30,6 @@ static std::string json_escape(const std::string &value) {
     return out;
 }
 
-static bool send_ctrl(int fd, const char *cmd) {
-    return send(fd, cmd, strlen(cmd), 0) == static_cast<ssize_t>(strlen(cmd));
-}
-
 static std::string field_after(const std::string &event, const char *key) {
     std::string needle = key;
     size_t pos = event.find(needle);
@@ -54,12 +46,6 @@ static std::string normalize_event(const std::string &event) {
         return event;
     }
     return event.substr(pos);
-}
-
-static std::string ctrl_path_for(const std::string &dir, const std::string &iface) {
-    std::string base = dir.empty() ? "/var/run/wpa_supplicant" : dir;
-    if (!base.empty() && base.back() == '/') base.pop_back();
-    return base + "/" + iface;
 }
 
 static const char *semantic_state_for_event(const std::string &event) {
@@ -178,64 +164,29 @@ bool WpaEventMonitor::handle_connected_event() {
 }
 
 void WpaEventMonitor::run() {
+    const std::string ctrl_path = wpa_ctrl_path_for(iface_, ctrl_dir_);
+
     while (running_) {
-        int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
-        if (fd < 0) {
-            usleep(1000 * 1000);
-            continue;
-        }
-
-        std::string local_path = "/tmp/network_service_wpa_" + iface_ + "_" + std::to_string(getpid()) + ".sock";
-        unlink(local_path.c_str());
-
-        sockaddr_un local;
-        memset(&local, 0, sizeof(local));
-        local.sun_family = AF_UNIX;
-        snprintf(local.sun_path, sizeof(local.sun_path), "%s", local_path.c_str());
-        if (bind(fd, reinterpret_cast<sockaddr *>(&local), sizeof(local)) != 0) {
-            close(fd);
-            usleep(1000 * 1000);
-            continue;
-        }
-
-        sockaddr_un remote;
-        memset(&remote, 0, sizeof(remote));
-        remote.sun_family = AF_UNIX;
-        std::string ctrl_path = ctrl_path_for(ctrl_dir_, iface_);
-        snprintf(remote.sun_path, sizeof(remote.sun_path), "%s", ctrl_path.c_str());
-        if (connect(fd, reinterpret_cast<sockaddr *>(&remote), sizeof(remote)) != 0) {
-            close(fd);
-            unlink(local_path.c_str());
+        WpaCtrlClient ctrl(ctrl_path);
+        std::string error;
+        if (!ctrl.open(error) || !ctrl.attach(error)) {
+            {
+                std::lock_guard<std::mutex> guard(lock_);
+                snapshot_.attached = false;
+            }
             usleep(1500 * 1000);
             continue;
         }
 
-        if (!send_ctrl(fd, "ATTACH")) {
-            close(fd);
-            unlink(local_path.c_str());
-            usleep(1500 * 1000);
-            continue;
-        }
-
-        char buffer[1024];
-        ssize_t n = recv(fd, buffer, sizeof(buffer) - 1, 0);
-        if (n <= 0) {
-            close(fd);
-            unlink(local_path.c_str());
-            usleep(1500 * 1000);
-            continue;
-        }
-        buffer[n] = '\0';
         {
             std::lock_guard<std::mutex> guard(lock_);
-            snapshot_.attached = strstr(buffer, "OK") != nullptr;
+            snapshot_.attached = true;
         }
 
         while (running_) {
-            struct pollfd pfd;
-            pfd.fd = fd;
+            pollfd pfd{};
+            pfd.fd = ctrl.fd();
             pfd.events = POLLIN;
-            pfd.revents = 0;
             int ret = poll(&pfd, 1, 1000);
             if (ret < 0) {
                 if (errno == EINTR) continue;
@@ -245,20 +196,20 @@ void WpaEventMonitor::run() {
             if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) break;
             if (!(pfd.revents & POLLIN)) continue;
 
-            n = recv(fd, buffer, sizeof(buffer) - 1, 0);
-            if (n <= 0) break;
-            buffer[n] = '\0';
-            std::string event(buffer);
-            std::string normalized = normalize_event(event);
+            std::string event;
+            if (!ctrl.receive(event, error)) break;
+            const std::string normalized = normalize_event(event);
             update_event(normalized);
             if (normalized.find("CTRL-EVENT-CONNECTED") != std::string::npos) {
                 handle_connected_event();
             }
         }
 
-        (void)send_ctrl(fd, "DETACH");
-        close(fd);
-        unlink(local_path.c_str());
+        {
+            std::lock_guard<std::mutex> guard(lock_);
+            snapshot_.attached = false;
+        }
+        ctrl.close();
         if (running_) {
             usleep(1000 * 1000);
         }
