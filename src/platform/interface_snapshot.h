@@ -6,7 +6,6 @@
 namespace network_service {
 
 NetworkSnapshot read_live_snapshot(const char *eth_iface, const char *wifi_iface);
-std::string snapshot_to_json(const NetworkSnapshot &snapshot);
 
 } // namespace network_service
 
