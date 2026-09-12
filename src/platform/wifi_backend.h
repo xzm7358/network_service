@@ -41,8 +41,6 @@ bool wifi_scan_start(const std::string &iface, std::string &error);
 std::vector<WifiApRecord> wifi_scan_results(const std::string &iface, std::string &error);
 std::vector<WifiApRecord> wifi_scan(const std::string &iface, std::string &error);
 std::vector<WifiSavedNetwork> wifi_list_saved(const std::string &iface, std::string &error);
-std::string wifi_scan_to_json(const std::vector<WifiApRecord> &records);
-std::string wifi_saved_to_json(const std::vector<WifiSavedNetwork> &records);
 
 } // namespace network_service
 
