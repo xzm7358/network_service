@@ -263,6 +263,15 @@ bool NetworkControlPlane::recompute_dns_locked(std::string &error) {
 
     std::string selected;
     bool preserve_external = false;
+    NetworkSnapshot live;
+    bool have_live = false;
+    auto load_live = [&]() -> const NetworkSnapshot & {
+        if (!have_live && ops_.snapshot) {
+            live = ops_.snapshot();
+            have_live = true;
+        }
+        return live;
+    };
 
     switch (route_policy_) {
     case RoutePolicy::WifiPreferred:
@@ -289,8 +298,8 @@ bool NetworkControlPlane::recompute_dns_locked(std::string &error) {
             selected = eth_dns;
         } else {
             if (ops_.snapshot) {
-                const NetworkSnapshot live = ops_.snapshot();
-                preserve_external = live.eth.has_default_route &&
+                const NetworkSnapshot &current = load_live();
+                preserve_external = current.eth.has_default_route &&
                                     !static_eth_route && !dhcp_eth_route;
             }
             if (!preserve_external && wifi_route && !wifi_dns.empty()) {
@@ -300,10 +309,23 @@ bool NetworkControlPlane::recompute_dns_locked(std::string &error) {
         break;
     }
 
-    if (preserve_external) return true;
+    if (preserve_external) {
+        if (managed_dns_) {
+            if (!ops_.clear_dns) {
+                error = "DNS clear port is unavailable";
+                return false;
+            }
+            if (!ops_.clear_dns(error)) return false;
+            managed_dns_ = false;
+            last_dns_.clear();
+        }
+        return true;
+    }
 
     if (!selected.empty()) {
-        if (managed_dns_ && selected == last_dns_) return true;
+        if (managed_dns_ && selected == last_dns_) {
+            if (!ops_.snapshot || load_live().dns4 == selected) return true;
+        }
         if (!ops_.set_dns) {
             error = "DNS configuration port is unavailable";
             return false;
