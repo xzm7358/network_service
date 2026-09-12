@@ -122,6 +122,7 @@ bool NetlinkMonitor::drain(bool &changed, std::string &error) {
                 return true;
             }
             error = std::string("netlink recv failed: ") + std::strerror(errno);
+            close();
             return false;
         }
         if (n == 0) return true;
@@ -138,6 +139,7 @@ bool NetlinkMonitor::drain(bool &changed, std::string &error) {
                     if (nlerr->error != 0) {
                         error = "netlink reported error " +
                                 std::to_string(-nlerr->error);
+                        close();
                         return false;
                     }
                 }
