@@ -6,6 +6,10 @@ bool wifi_l2_connected(WifiL2State state) {
     return state == WifiL2State::Connected;
 }
 
+bool dhcp_client_active(DhcpClientState state) {
+    return state == DhcpClientState::Starting || state == DhcpClientState::Running;
+}
+
 const char *wifi_l2_state_name(WifiL2State state) {
     switch (state) {
     case WifiL2State::Disabled: return "disabled";
@@ -29,6 +33,16 @@ const char *ip_state_name(IpState state) {
     }
 }
 
+const char *dhcp_client_state_name(DhcpClientState state) {
+    switch (state) {
+    case DhcpClientState::Starting: return "starting";
+    case DhcpClientState::Running: return "running";
+    case DhcpClientState::Failed: return "failed";
+    case DhcpClientState::Idle:
+    default: return "idle";
+    }
+}
+
 void normalize_network_snapshot(NetworkSnapshot &snapshot,
                                 const WifiRuntimeFact &wifi_runtime) {
     snapshot.eth.ip_state = snapshot.eth.has_ip ? IpState::Ready : IpState::None;
@@ -48,7 +62,7 @@ void normalize_network_snapshot(NetworkSnapshot &snapshot,
 
     if (l2_connected && snapshot.wifi.has_ip) {
         snapshot.wifi.ip_state = IpState::Ready;
-    } else if (l2_connected && wifi_runtime.dhcp_requested) {
+    } else if (l2_connected && dhcp_client_active(wifi_runtime.dhcp_state)) {
         snapshot.wifi.ip_state = IpState::Configuring;
     } else {
         snapshot.wifi.ip_state = IpState::None;
@@ -74,8 +88,13 @@ void normalize_network_snapshot(NetworkSnapshot &snapshot,
 
 std::string legacy_wifi_state(const NetworkSnapshot &snapshot,
                               const WifiRuntimeFact &wifi_runtime) {
-    if (!wifi_runtime.failure_reason.empty() ||
-        wifi_runtime.l2_state == WifiL2State::Failed) {
+    if (wifi_runtime.l2_state == WifiL2State::Failed) {
+        return "failed";
+    }
+    // A DHCP-process failure must stop an endless `ip_configuring` projection,
+    // but it does not invalidate already-observed IPv4/route/DNS truth.
+    if (!wifi_runtime.failure_reason.empty() &&
+        snapshot.wifi.ip_state != IpState::Ready) {
         return "failed";
     }
 
@@ -95,7 +114,7 @@ std::string legacy_wifi_state(const NetworkSnapshot &snapshot,
             snapshot.wifi.has_default_route && snapshot.dns_available) {
             return "connected";
         }
-        return wifi_runtime.dhcp_requested ? "ip_configuring" : "associated";
+        return dhcp_client_active(wifi_runtime.dhcp_state) ? "ip_configuring" : "associated";
     case WifiL2State::Unknown:
     default:
         // Preserve startup compatibility when NetworkService adopts an already

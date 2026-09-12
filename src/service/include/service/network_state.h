@@ -9,13 +9,15 @@ namespace network_service {
 
 struct WifiRuntimeFact {
     WifiL2State l2_state = WifiL2State::Unknown;
-    bool dhcp_requested = false;
+    DhcpClientState dhcp_state = DhcpClientState::Idle;
     std::string failure_reason;
 };
 
 bool wifi_l2_connected(WifiL2State state);
+bool dhcp_client_active(DhcpClientState state);
 const char *wifi_l2_state_name(WifiL2State state);
 const char *ip_state_name(IpState state);
+const char *dhcp_client_state_name(DhcpClientState state);
 
 // Converts independent platform facts (link/IP/route/DNS) into one normalized
 // Service truth model. This function is pure and performs no network mutation.

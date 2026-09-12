@@ -1,4 +1,7 @@
+#include <cerrno>
 #include <csignal>
+#include <cstring>
+#include <fcntl.h>
 #include <iostream>
 #include <string>
 #include <unistd.h>
@@ -12,6 +15,67 @@
 #include "service/network_daemon.h"
 
 namespace {
+
+constexpr const char *kProcessLockPath = "/tmp/network_service.lock";
+
+class ProcessSingletonLock {
+public:
+    ~ProcessSingletonLock() {
+        if (fd_ >= 0) close(fd_);
+    }
+
+    ProcessSingletonLock(const ProcessSingletonLock &) = delete;
+    ProcessSingletonLock &operator=(const ProcessSingletonLock &) = delete;
+    ProcessSingletonLock() = default;
+
+    bool acquire(std::string &error) {
+        error.clear();
+        if (fd_ >= 0) return true;
+
+        const int fd = open(kProcessLockPath, O_CREAT | O_RDWR, 0644);
+        if (fd < 0) {
+            error = std::string("failed to open singleton lock: ") + std::strerror(errno);
+            return false;
+        }
+
+        struct flock lock{};
+        lock.l_type = F_WRLCK;
+        lock.l_whence = SEEK_SET;
+        lock.l_start = 0;
+        lock.l_len = 0;
+        if (fcntl(fd, F_SETLK, &lock) != 0) {
+            const int saved_errno = errno;
+            close(fd);
+            if (saved_errno == EACCES || saved_errno == EAGAIN) {
+                error = "another network_service instance owns the process lock";
+            } else {
+                error = std::string("failed to acquire singleton lock: ") +
+                        std::strerror(saved_errno);
+            }
+            return false;
+        }
+
+        const int descriptor_flags = fcntl(fd, F_GETFD, 0);
+        if (descriptor_flags < 0 ||
+            fcntl(fd, F_SETFD, descriptor_flags | FD_CLOEXEC) != 0) {
+            const int saved_errno = errno;
+            close(fd);
+            error = std::string("failed to protect singleton lock across exec: ") +
+                    std::strerror(saved_errno);
+            return false;
+        }
+
+        const std::string owner = std::to_string(static_cast<long>(getpid())) + "\n";
+        (void)ftruncate(fd, 0);
+        (void)lseek(fd, 0, SEEK_SET);
+        (void)write(fd, owner.data(), owner.size());
+        fd_ = fd;
+        return true;
+    }
+
+private:
+    int fd_ = -1;
+};
 
 void handle_signal(int) {
     const char wake = 'x';
@@ -70,6 +134,14 @@ int main(int argc, char **argv) {
     Options options;
     if (!parse_args(argc, argv, options)) {
         return 1;
+    }
+
+    ProcessSingletonLock process_lock;
+    std::string lock_error;
+    if (!process_lock.acquire(lock_error)) {
+        std::cerr << "network_service: PROCESS_OWNERSHIP_REJECTED error="
+                  << lock_error << std::endl;
+        return 3;
     }
 
     signal(SIGTERM, handle_signal);

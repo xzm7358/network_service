@@ -2,6 +2,7 @@
 
 #include "platform/wpa_event_monitor.h"
 #include "service/network_control_plane.h"
+#include "service/wifi_manager.h"
 
 namespace network_service {
 
@@ -12,6 +13,9 @@ bool NetworkDaemon::reconcile(bool &changed, std::string &error) {
         return false;
     }
 
+    const bool dhcp_process_changed =
+        wifi_manager_ && wifi_manager_->reconcile_dhcp_process();
+
     // A production target without a usable kernel event source must retain the
     // pre-Netlink full 250 ms reconciliation semantics, including external
     // Ethernet/DNS policy refresh. Deterministic injected snapshots are kept
@@ -21,7 +25,10 @@ bool NetworkDaemon::reconcile(bool &changed, std::string &error) {
         return control_plane_->reconcile(error);
     }
 
-    return control_plane_->reconcile(changed, error);
+    bool network_changed = false;
+    const bool ok = control_plane_->reconcile(network_changed, error);
+    changed = dhcp_process_changed || network_changed;
+    return ok;
 }
 
 bool NetworkDaemon::consume_runtime_state_dirty() {

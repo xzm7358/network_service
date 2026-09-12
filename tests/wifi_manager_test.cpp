@@ -20,6 +20,8 @@ bool expect(bool condition, const char *message) {
 } // namespace
 
 int main() {
+    using network_service::DhcpClientState;
+
     bool ok = true;
 
     {
@@ -37,14 +39,16 @@ int main() {
         auto state = manager.state();
         ok = expect(starts.load() == 1, "duplicate CONNECTED restarted DHCP") && ok;
         ok = expect(state.l2_connected, "L2 should be connected") && ok;
-        ok = expect(state.dhcp_requested, "DHCP should be requested") && ok;
+        ok = expect(state.dhcp_state == DhcpClientState::Running,
+                    "DHCP should be running") && ok;
         ok = expect(state.dhcp_requests == 1, "unexpected DHCP request count") && ok;
 
         manager.on_l2_disconnected();
         state = manager.state();
         ok = expect(stops.load() == 1, "disconnect should stop DHCP once") && ok;
         ok = expect(!state.l2_connected, "L2 should be disconnected") && ok;
-        ok = expect(!state.dhcp_requested, "DHCP request should be cleared") && ok;
+        ok = expect(state.dhcp_state == DhcpClientState::Idle,
+                    "DHCP lifecycle should return to idle") && ok;
 
         manager.on_l2_connected();
         state = manager.state();
@@ -54,6 +58,8 @@ int main() {
         manager.stop_dhcp();
         manager.stop_dhcp();
         ok = expect(stops.load() == 2, "explicit stop should be idempotent") && ok;
+        ok = expect(manager.state().dhcp_state == DhcpClientState::Idle,
+                    "explicit stop must leave DHCP idle") && ok;
     }
 
     {
@@ -66,7 +72,8 @@ int main() {
 
         manager.on_l2_connected();
         const auto state = manager.state();
-        ok = expect(!state.dhcp_requested, "failed DHCP start marked requested") && ok;
+        ok = expect(state.dhcp_state == DhcpClientState::Failed,
+                    "failed DHCP start must enter failed state") && ok;
         ok = expect(state.dhcp_requests == 1, "failed start must count one attempt") && ok;
         ok = expect(state.failure_reason.find("dhcp_start_failed") == 0,
                     "failed start reason missing") && ok;
@@ -89,6 +96,8 @@ int main() {
 
         ok = expect(starts.load() == 1,
                     "concurrent CONNECTED events started multiple DHCP clients") && ok;
+        ok = expect(manager.state().dhcp_state == DhcpClientState::Running,
+                    "concurrent start did not settle in running state") && ok;
     }
 
     {
@@ -139,8 +148,47 @@ int main() {
                     "connect/disconnect race started DHCP more than once") && ok;
         ok = expect(stops.load() == 1,
                     "cancelling transition must own exactly one DHCP stop") && ok;
-        ok = expect(!state.l2_connected && !state.dhcp_requested,
+        ok = expect(!state.l2_connected && state.dhcp_state == DhcpClientState::Idle,
                     "disconnect during start left a live DHCP lifecycle") && ok;
+    }
+
+    {
+        std::atomic<int> starts{0};
+        std::atomic<bool> process_running{true};
+        network_service::WifiManager manager(
+            [&](std::string &) {
+                ++starts;
+                process_running.store(true);
+                return true;
+            },
+            [&]() { process_running.store(false); },
+            [&]() { return process_running.load(); });
+
+        manager.on_l2_connected();
+        ok = expect(manager.state().dhcp_state == DhcpClientState::Running,
+                    "process-truth fixture did not start running") && ok;
+        ok = expect(!manager.reconcile_dhcp_process(),
+                    "live DHCP process changed lifecycle unexpectedly") && ok;
+
+        process_running.store(false);
+        ok = expect(manager.reconcile_dhcp_process(),
+                    "DHCP process exit was not detected") && ok;
+        auto state = manager.state();
+        ok = expect(state.l2_connected,
+                    "DHCP process exit must not invent an L2 disconnect") && ok;
+        ok = expect(state.dhcp_state == DhcpClientState::Failed,
+                    "DHCP process exit must enter failed lifecycle") && ok;
+        ok = expect(state.failure_reason == "dhcp_process_exited",
+                    "DHCP process exit diagnostic mismatch") && ok;
+        ok = expect(!manager.reconcile_dhcp_process(),
+                    "failed lifecycle should not repeatedly republish process exit") && ok;
+
+        // A later real CONNECTED event may initiate a new lifecycle; there is no
+        // hidden timer-based retry policy in the process-truth reconciler.
+        manager.on_l2_connected();
+        state = manager.state();
+        ok = expect(starts.load() == 2 && state.dhcp_state == DhcpClientState::Running,
+                    "new CONNECTED event did not start a fresh DHCP lifecycle") && ok;
     }
 
     return ok ? 0 : 1;

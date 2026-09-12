@@ -11,6 +11,18 @@ case "$1" in
     echo "Starting network_service..."
     mkdir -p /tmp
     "$BIN" --socket "$SOCKET_PATH" --eth "$ETH_IFACE" --wifi "$WIFI_IFACE" --config-dir /dnake/data --event-dir "$EVENT_DIR" &
+    pid=$!
+    # Do not let init report success when the binary immediately rejects a
+    # duplicate owner (or any other startup failure). POSIX kill -0 is available
+    # in BusyBox ash and does not require pgrep/pidof.
+    sleep 1
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid"
+      rc=$?
+      echo "network_service failed to start: rc=$rc"
+      exit "$rc"
+    fi
+    echo "network_service started: pid=$pid"
     ;;
   stop)
     echo "Stopping network_service..."

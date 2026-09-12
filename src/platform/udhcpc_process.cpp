@@ -90,6 +90,14 @@ bool pid_matches_udhcpc_iface(int pid, const std::string &iface) {
 #endif
 }
 
+bool read_owned_pid(const std::string &iface, int &pid) {
+    pid = -1;
+    if (!is_safe_iface(iface)) return false;
+    std::ifstream f(UdhcpcProcess::pidfile_for(iface));
+    if (!(f >> pid)) return false;
+    return pid_matches_udhcpc_iface(pid, iface);
+}
+
 std::string next_generation() {
     static std::atomic<unsigned long long> sequence{0};
     const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -170,6 +178,11 @@ std::string UdhcpcProcess::event_script_path(const std::string &iface,
     return "/tmp/network_service_udhcpc_" + iface + "_" + generation + ".script";
 }
 
+bool UdhcpcProcess::is_running(const std::string &iface) {
+    int pid = -1;
+    return read_owned_pid(iface, pid);
+}
+
 void UdhcpcProcess::stop(const std::string &iface) {
     if (!is_safe_iface(iface)) return;
 
@@ -181,15 +194,11 @@ void UdhcpcProcess::stop(const std::string &iface) {
                                             generation_exists,
                                             ignored);
 
-    const std::string pidfile = pidfile_for(iface);
-    std::ifstream f(pidfile);
     int pid = -1;
-    if (f >> pid) {
-        if (pid_matches_udhcpc_iface(pid, iface)) {
-            (void)kill(pid, SIGTERM);
-        }
+    if (read_owned_pid(iface, pid)) {
+        (void)kill(pid, SIGTERM);
     }
-    (void)unlink(pidfile.c_str());
+    (void)unlink(pidfile_for(iface).c_str());
 
     if (generation_exists) {
         (void)unlink(event_script_path(iface, generation).c_str());
@@ -215,7 +224,10 @@ bool UdhcpcProcess::start(const std::string &iface, std::string &error) {
 
     const std::string script_path = event_script_path(iface, generation);
     std::ostringstream os;
-    os << "udhcpc -i " << iface
+    // Keep the DHCP client in the foreground relative to its own process so the
+    // pidfile describes the long-lived client rather than a daemonization parent.
+    // The shell backgrounding is only used to keep NetworkService non-blocking.
+    os << "udhcpc -f -i " << iface
        << " -t 15 -n -p " << shell_quote(pidfile_for(iface))
        << " -s " << shell_quote(script_path) << " &";
     if (!run_command(os.str(), error)) {
@@ -223,7 +235,20 @@ bool UdhcpcProcess::start(const std::string &iface, std::string &error) {
         DhcpLeaseStore::clear(iface);
         return false;
     }
-    return true;
+
+    // `system("... &")` only proves that the shell accepted the launch. Require
+    // observable process truth before reporting a successful mechanism start.
+    for (int i = 0; i < 20; ++i) {
+        if (is_running(iface)) {
+            error.clear();
+            return true;
+        }
+        usleep(25 * 1000);
+    }
+
+    error = "udhcpc did not remain running";
+    stop(iface);
+    return false;
 }
 
 } // namespace network_service

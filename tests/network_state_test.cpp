@@ -21,6 +21,7 @@ network_service::NetworkSnapshot base_snapshot() {
 } // namespace
 
 int main() {
+    using network_service::DhcpClientState;
     using network_service::IpState;
     using network_service::WifiL2State;
     using network_service::WifiRuntimeFact;
@@ -33,7 +34,7 @@ int main() {
         auto snapshot = base_snapshot();
         WifiRuntimeFact runtime;
         runtime.l2_state = WifiL2State::Connected;
-        runtime.dhcp_requested = true;
+        runtime.dhcp_state = DhcpClientState::Running;
         normalize_network_snapshot(snapshot, runtime);
 
         ok = expect(snapshot.wifi.connected,
@@ -48,6 +49,20 @@ int main() {
 
     {
         auto snapshot = base_snapshot();
+        WifiRuntimeFact runtime;
+        runtime.l2_state = WifiL2State::Connected;
+        runtime.dhcp_state = DhcpClientState::Failed;
+        runtime.failure_reason = "dhcp_process_exited";
+        normalize_network_snapshot(snapshot, runtime);
+
+        ok = expect(snapshot.wifi.ip_state == IpState::None,
+                    "failed DHCP process without IP must leave Configuring") && ok;
+        ok = expect(legacy_wifi_state(snapshot, runtime) == "failed",
+                    "failed DHCP process without IP must surface failure") && ok;
+    }
+
+    {
+        auto snapshot = base_snapshot();
         snapshot.wifi.has_ip = true;
         snapshot.wifi.ip4 = "10.0.0.20";
         snapshot.wifi.has_default_route = true;
@@ -58,7 +73,7 @@ int main() {
 
         WifiRuntimeFact runtime;
         runtime.l2_state = WifiL2State::Connected;
-        runtime.dhcp_requested = true;
+        runtime.dhcp_state = DhcpClientState::Running;
         normalize_network_snapshot(snapshot, runtime);
 
         ok = expect(snapshot.wifi.ip_state == IpState::Ready,
@@ -69,6 +84,26 @@ int main() {
                     "route + DNS on connected Wi-Fi must be network ready") && ok;
         ok = expect(legacy_wifi_state(snapshot, runtime) == "connected",
                     "legacy WPA state must become connected only after L3 readiness") && ok;
+    }
+
+    {
+        auto snapshot = base_snapshot();
+        snapshot.wifi.has_ip = true;
+        snapshot.wifi.has_default_route = true;
+        snapshot.wifi.route_metric = 20;
+        snapshot.dns_available = true;
+        snapshot.dns4 = "8.8.8.8";
+
+        WifiRuntimeFact runtime;
+        runtime.l2_state = WifiL2State::Connected;
+        runtime.dhcp_state = DhcpClientState::Failed;
+        runtime.failure_reason = "dhcp_process_exited";
+        normalize_network_snapshot(snapshot, runtime);
+
+        ok = expect(snapshot.wifi.ip_state == IpState::Ready && snapshot.network_ready,
+                    "DHCP client exit must not erase already-observed L3 truth") && ok;
+        ok = expect(legacy_wifi_state(snapshot, runtime) == "connected",
+                    "ready network truth must outrank DHCP process health in legacy state") && ok;
     }
 
     {
