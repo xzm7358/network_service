@@ -17,6 +17,7 @@ network_service::NetworkSnapshot baseline_snapshot() {
     snapshot.eth.enabled = true;
     snapshot.eth.carrier_up = false;
     snapshot.eth.connected = false;
+    snapshot.eth.ip_state = network_service::IpState::None;
     snapshot.eth.route_metric = 10;
 
     snapshot.wifi.iface = "wlan0";
@@ -24,6 +25,8 @@ network_service::NetworkSnapshot baseline_snapshot() {
     snapshot.wifi.enabled = true;
     snapshot.wifi.carrier_up = true;
     snapshot.wifi.connected = true;
+    snapshot.wifi.wifi_l2_state = network_service::WifiL2State::Connected;
+    snapshot.wifi.ip_state = network_service::IpState::Ready;
     snapshot.wifi.has_ip = true;
     snapshot.wifi.ip4 = "192.168.1.20";
     snapshot.wifi.netmask4 = "255.255.255.0";
@@ -35,6 +38,7 @@ network_service::NetworkSnapshot baseline_snapshot() {
     snapshot.wifi.signal_bars = 4;
 
     snapshot.primary_iface = "wlan0";
+    snapshot.network_ready = true;
     snapshot.online = true;
     snapshot.dns_available = true;
     snapshot.dns4 = "1.1.1.1";
@@ -80,12 +84,25 @@ void test_signal_bars_are_ui_visible_wifi_state() {
             "wifi payload contract changed");
 }
 
+void test_typed_wifi_truth_change_is_visible() {
+    network_service::NetworkStateChangeDetector detector;
+    auto snapshot = baseline_snapshot();
+    (void)detector.observe(snapshot);
+    snapshot.wifi.wifi_l2_state = network_service::WifiL2State::Disconnected;
+    snapshot.wifi.ip_state = network_service::IpState::None;
+    snapshot.wifi.connected = false;
+    const auto changes = detector.observe(snapshot);
+    require(changes.wifi,
+            "typed L2/IP transition must classify as wifi") ;
+}
+
 void test_eth_state_change() {
     network_service::NetworkStateChangeDetector detector;
     auto snapshot = baseline_snapshot();
     (void)detector.observe(snapshot);
     snapshot.eth.carrier_up = true;
     snapshot.eth.connected = true;
+    snapshot.eth.ip_state = network_service::IpState::Ready;
     snapshot.eth.has_ip = true;
     snapshot.eth.ip4 = "10.0.0.20";
     const auto changes = detector.observe(snapshot);
@@ -98,6 +115,7 @@ void test_route_and_dns_change_have_stable_order() {
     auto snapshot = baseline_snapshot();
     (void)detector.observe(snapshot);
     snapshot.primary_iface = "eth0";
+    snapshot.network_ready = false;
     snapshot.online = false;
     snapshot.dns_available = false;
     snapshot.dns4.clear();
@@ -115,9 +133,12 @@ void test_multiple_categories_share_one_change_set() {
     (void)detector.observe(snapshot);
     snapshot.eth.carrier_up = true;
     snapshot.wifi.connected = false;
+    snapshot.wifi.wifi_l2_state = network_service::WifiL2State::Disconnected;
+    snapshot.wifi.ip_state = network_service::IpState::None;
     snapshot.wifi.has_ip = false;
     snapshot.wifi.ip4.clear();
     snapshot.primary_iface.clear();
+    snapshot.network_ready = false;
     snapshot.online = false;
     snapshot.dns_available = false;
     snapshot.dns4.clear();
@@ -147,6 +168,7 @@ int main() {
         test_identical_snapshot_is_quiet();
         test_raw_signal_dbm_is_not_a_trigger();
         test_signal_bars_are_ui_visible_wifi_state();
+        test_typed_wifi_truth_change_is_visible();
         test_eth_state_change();
         test_route_and_dns_change_have_stable_order();
         test_multiple_categories_share_one_change_set();
