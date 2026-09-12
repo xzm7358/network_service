@@ -26,6 +26,7 @@ add_executable(${NETWORK_SERVICE_TARGET}
     src/config/ethernet_config.cpp
     src/platform/ethernet_apply.cpp
     src/platform/wifi_backend.cpp
+    src/platform/wpa_ctrl_client.cpp
     src/platform/wpa_event_monitor.cpp
 )
 
@@ -144,6 +145,7 @@ if(BUILD_TESTING)
         src/config/ethernet_config.cpp
         src/platform/ethernet_apply.cpp
         src/platform/wifi_backend.cpp
+        src/platform/wpa_ctrl_client.cpp
         src/platform/wpa_event_monitor.cpp
     )
     target_include_directories(network_state_event_integration_test PRIVATE
@@ -175,6 +177,7 @@ if(BUILD_TESTING)
         src/config/ethernet_config.cpp
         src/platform/ethernet_apply.cpp
         src/platform/wifi_backend.cpp
+        src/platform/wpa_ctrl_client.cpp
         src/platform/wpa_event_monitor.cpp
     )
     target_include_directories(network_service_e2e_fixture PRIVATE
