@@ -29,7 +29,6 @@ enum class WifiL2State {
     Unknown = 0,
     Disabled,
     Disconnected,
-    Scanning,
     Associating,
     Associated,
     Handshake,
@@ -60,7 +59,8 @@ struct InterfaceSnapshot {
     bool connected = false;
 
     // Internal truth. ip_state is meaningful for both interfaces; wifi_l2_state
-    // is meaningful only for the Wi-Fi interface.
+    // is meaningful only for the Wi-Fi interface. Scanning is intentionally not
+    // an L2 state; it belongs to the independent Wi-Fi scan lifecycle.
     IpState ip_state = IpState::None;
     WifiL2State wifi_l2_state = WifiL2State::Unknown;
 
