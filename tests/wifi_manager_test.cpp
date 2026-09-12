@@ -191,5 +191,38 @@ int main() {
                     "new CONNECTED event did not start a fresh DHCP lifecycle") && ok;
     }
 
+    {
+        std::atomic<int> starts{0};
+        std::atomic<int> stops{0};
+        std::atomic<bool> process_running{true};
+        network_service::WifiManager manager(
+            [&](std::string &) {
+                ++starts;
+                return true;
+            },
+            [&]() { ++stops; },
+            [&]() { return process_running.load(); });
+
+        manager.adopt_dhcp_running();
+        auto state = manager.state();
+        ok = expect(state.dhcp_state == DhcpClientState::Running,
+                    "brownfield DHCP process was not imported as running") && ok;
+        ok = expect(!state.l2_connected,
+                    "DHCP adoption must not invent an L2 connected fact") && ok;
+        ok = expect(state.dhcp_requests == 0,
+                    "adoption must not count as a newly requested DHCP lifecycle") && ok;
+
+        manager.on_l2_connected();
+        state = manager.state();
+        ok = expect(starts.load() == 0,
+                    "post-adoption CONNECTED event started duplicate DHCP") && ok;
+        ok = expect(state.l2_connected && state.dhcp_state == DhcpClientState::Running,
+                    "CONNECTED event did not merge with adopted DHCP lifecycle") && ok;
+
+        manager.on_l2_disconnected();
+        ok = expect(stops.load() == 1,
+                    "disconnect must stop the adopted DHCP lifecycle once") && ok;
+    }
+
     return ok ? 0 : 1;
 }
