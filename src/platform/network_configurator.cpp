@@ -10,6 +10,8 @@
 namespace network_service {
 namespace {
 
+constexpr const char *kDnsOwnerMarker = "# managed-by-network-service";
+
 bool is_safe_iface(const std::string &value) {
     if (value.empty() || value.size() > 15) return false;
     for (char ch : value) {
@@ -34,6 +36,14 @@ bool run_command(const std::string &cmd, std::string &error) {
     os << "command failed rc=" << rc << ": " << cmd;
     error = os.str();
     return false;
+}
+
+bool dns_file_owned_by_network_service() {
+    std::ifstream input("/etc/resolv.conf");
+    if (!input) return false;
+    std::string first;
+    std::getline(input, first);
+    return first == kDnsOwnerMarker;
 }
 
 } // namespace
@@ -97,7 +107,8 @@ bool NetworkConfigurator::set_primary_dns(const std::string &dns4, std::string &
         error = "failed to open /etc/resolv.conf";
         return false;
     }
-    out << "nameserver " << dns4 << '\n';
+    out << kDnsOwnerMarker << '\n'
+        << "nameserver " << dns4 << '\n';
     out.close();
     if (!out) {
         error = "failed to write /etc/resolv.conf";
@@ -108,6 +119,11 @@ bool NetworkConfigurator::set_primary_dns(const std::string &dns4, std::string &
 
 bool NetworkConfigurator::clear_dns(std::string &error) {
     error.clear();
+
+    // DNS may also be owned by a protected/external Ethernet management path.
+    // Never truncate a resolver file after another owner has replaced ours.
+    if (!dns_file_owned_by_network_service()) return true;
+
     std::ofstream out("/etc/resolv.conf", std::ios::out | std::ios::trunc);
     if (!out) {
         error = "failed to open /etc/resolv.conf";
