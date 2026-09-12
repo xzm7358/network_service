@@ -23,6 +23,53 @@ const NetworkControlPlane::LinkState &NetworkControlPlane::link_for(const std::s
     return iface == eth_iface_ ? eth_ : wifi_;
 }
 
+NetworkControlPlane::OwnedRouteState &NetworkControlPlane::owned_route_for(
+    const std::string &iface) {
+    return iface == eth_iface_ ? eth_route_ : wifi_route_;
+}
+
+bool NetworkControlPlane::clear_owned_route_locked(const std::string &iface,
+                                                   std::string &error) {
+    error.clear();
+    OwnedRouteState &owned = owned_route_for(iface);
+    if (!owned.active) return true;
+    if (!ops_.clear_default_route) {
+        error = "default-route clear port is unavailable";
+        return false;
+    }
+    if (!ops_.clear_default_route(iface, owned.gateway4, owned.metric, error)) {
+        return false;
+    }
+    owned = OwnedRouteState{};
+    return true;
+}
+
+bool NetworkControlPlane::ensure_owned_route_locked(const std::string &iface,
+                                                    const std::string &gateway4,
+                                                    int metric,
+                                                    std::string &error) {
+    error.clear();
+    if (gateway4.empty()) return clear_owned_route_locked(iface, error);
+    if (!ops_.set_default_route) {
+        error = "default-route port is unavailable";
+        return false;
+    }
+
+    OwnedRouteState &owned = owned_route_for(iface);
+    if (owned.active && (owned.gateway4 != gateway4 || owned.metric != metric)) {
+        if (!clear_owned_route_locked(iface, error)) return false;
+    }
+
+    // Platform implements this as ensure-exact: if the route already exists
+    // (for example after daemon Brownfield restart) this is a non-mutating
+    // ownership adoption; otherwise it creates only this exact identity.
+    if (!ops_.set_default_route(iface, gateway4, metric, error)) return false;
+    owned.active = true;
+    owned.gateway4 = gateway4;
+    owned.metric = metric;
+    return true;
+}
+
 bool NetworkControlPlane::route_allowed(const std::string &iface) const {
     return !(route_policy_ == RoutePolicy::WifiOnly && iface == eth_iface_);
 }
@@ -54,10 +101,11 @@ bool NetworkControlPlane::start_dhcp(const std::string &iface, std::string &erro
         return false;
     }
 
+    if (!clear_owned_route_locked(iface, error)) return false;
+
     LinkState &state = link_for(iface);
     ops_.stop_dhcp(iface);
     ops_.clear_lease(iface);
-    if (ops_.clear_default_route) ops_.clear_default_route(iface);
     if (ops_.clear_ipv4) {
         std::string ignored;
         (void)ops_.clear_ipv4(iface, ignored);
@@ -72,9 +120,7 @@ bool NetworkControlPlane::start_dhcp(const std::string &iface, std::string &erro
         return false;
     }
 
-    if (!ops_.start_dhcp(iface, error)) {
-        return false;
-    }
+    if (!ops_.start_dhcp(iface, error)) return false;
     state.managed_dhcp = true;
     return true;
 }
@@ -83,16 +129,13 @@ void NetworkControlPlane::stop_dhcp(const std::string &iface) {
     std::lock_guard<std::mutex> guard(lock_);
     if (!known_iface(iface)) return;
 
+    std::string ignored;
+    (void)clear_owned_route_locked(iface, ignored);
     if (ops_.stop_dhcp) ops_.stop_dhcp(iface);
     if (ops_.clear_lease) ops_.clear_lease(iface);
-    if (ops_.clear_default_route) ops_.clear_default_route(iface);
-    if (ops_.clear_ipv4) {
-        std::string ignored;
-        (void)ops_.clear_ipv4(iface, ignored);
-    }
+    if (ops_.clear_ipv4) (void)ops_.clear_ipv4(iface, ignored);
 
     link_for(iface) = LinkState{};
-    std::string ignored;
     (void)recompute_dns_locked(ignored);
 }
 
@@ -109,16 +152,14 @@ bool NetworkControlPlane::apply_ethernet_static(const std::string &ip4,
         return false;
     }
 
+    if (!clear_owned_route_locked(eth_iface_, error)) return false;
     ops_.stop_dhcp(eth_iface_);
     ops_.clear_lease(eth_iface_);
-    if (ops_.clear_default_route) ops_.clear_default_route(eth_iface_);
 
     eth_ = LinkState{};
     static_eth_ = StaticEthernetState{};
 
-    if (!ops_.apply_ipv4(eth_iface_, ip4, netmask4, error)) {
-        return false;
-    }
+    if (!ops_.apply_ipv4(eth_iface_, ip4, netmask4, error)) return false;
 
     static_eth_.active = true;
     static_eth_.ip4 = ip4;
@@ -151,7 +192,7 @@ bool NetworkControlPlane::reconcile_link_locked(const std::string &iface,
     if (fingerprint == state.fingerprint) return true;
 
     if (fact.event == DhcpLeaseEvent::Deconfig) {
-        if (ops_.clear_default_route) ops_.clear_default_route(iface);
+        if (!clear_owned_route_locked(iface, error)) return false;
         if (ops_.clear_ipv4) {
             std::string clear_error;
             if (!ops_.clear_ipv4(iface, clear_error)) {
@@ -177,15 +218,11 @@ bool NetworkControlPlane::reconcile_link_locked(const std::string &iface,
     if (!ops_.apply_ipv4(iface, fact.ip4, fact.netmask4, error)) return false;
 
     if (route_allowed(iface) && !fact.gateway4.empty()) {
-        if (!ops_.set_default_route) {
-            error = "default-route port is unavailable";
+        if (!ensure_owned_route_locked(iface, fact.gateway4, route_metric(iface), error)) {
             return false;
         }
-        if (!ops_.set_default_route(iface, fact.gateway4, route_metric(iface), error)) {
-            return false;
-        }
-    } else if (ops_.clear_default_route) {
-        ops_.clear_default_route(iface);
+    } else if (!clear_owned_route_locked(iface, error)) {
+        return false;
     }
 
     state.active = true;
@@ -222,47 +259,36 @@ bool NetworkControlPlane::refresh_external_state(std::string &error) {
 bool NetworkControlPlane::apply_routes_locked(std::string &error) {
     error.clear();
 
-    if (static_eth_.active) {
-        if (route_allowed(eth_iface_) && !static_eth_.gateway4.empty()) {
-            if (!ops_.set_default_route ||
-                !ops_.set_default_route(eth_iface_,
-                                        static_eth_.gateway4,
-                                        route_metric(eth_iface_, static_eth_.manual_metric),
-                                        error)) {
-                if (error.empty()) error = "failed to apply Ethernet static route";
-                return false;
-            }
-        } else if (ops_.clear_default_route) {
-            ops_.clear_default_route(eth_iface_);
+    if (static_eth_.active && route_allowed(eth_iface_) && !static_eth_.gateway4.empty()) {
+        if (!ensure_owned_route_locked(eth_iface_,
+                                       static_eth_.gateway4,
+                                       route_metric(eth_iface_, static_eth_.manual_metric),
+                                       error)) {
+            if (error.empty()) error = "failed to apply Ethernet static route";
+            return false;
         }
-    } else if (eth_.active) {
-        if (route_allowed(eth_iface_) && !eth_.lease.gateway4.empty()) {
-            if (!ops_.set_default_route ||
-                !ops_.set_default_route(eth_iface_,
-                                        eth_.lease.gateway4,
-                                        route_metric(eth_iface_),
-                                        error)) {
-                if (error.empty()) error = "failed to apply Ethernet DHCP route";
-                return false;
-            }
-        } else if (ops_.clear_default_route) {
-            ops_.clear_default_route(eth_iface_);
+    } else if (eth_.active && route_allowed(eth_iface_) && !eth_.lease.gateway4.empty()) {
+        if (!ensure_owned_route_locked(eth_iface_,
+                                       eth_.lease.gateway4,
+                                       route_metric(eth_iface_),
+                                       error)) {
+            if (error.empty()) error = "failed to apply Ethernet DHCP route";
+            return false;
         }
+    } else if (!clear_owned_route_locked(eth_iface_, error)) {
+        return false;
     }
 
-    if (wifi_.active) {
-        if (route_allowed(wifi_iface_) && !wifi_.lease.gateway4.empty()) {
-            if (!ops_.set_default_route ||
-                !ops_.set_default_route(wifi_iface_,
-                                        wifi_.lease.gateway4,
-                                        route_metric(wifi_iface_),
-                                        error)) {
-                if (error.empty()) error = "failed to apply Wi-Fi DHCP route";
-                return false;
-            }
-        } else if (ops_.clear_default_route) {
-            ops_.clear_default_route(wifi_iface_);
+    if (wifi_.active && route_allowed(wifi_iface_) && !wifi_.lease.gateway4.empty()) {
+        if (!ensure_owned_route_locked(wifi_iface_,
+                                       wifi_.lease.gateway4,
+                                       route_metric(wifi_iface_),
+                                       error)) {
+            if (error.empty()) error = "failed to apply Wi-Fi DHCP route";
+            return false;
         }
+    } else if (!clear_owned_route_locked(wifi_iface_, error)) {
+        return false;
     }
     return true;
 }
@@ -354,6 +380,7 @@ bool NetworkControlPlane::recompute_dns_locked(std::string &error) {
         }
         if (!ops_.set_dns(selected, error)) return false;
         managed_dns_ = true;
+        last_dns_.clear();
         last_dns_ = selected;
         return true;
     }
