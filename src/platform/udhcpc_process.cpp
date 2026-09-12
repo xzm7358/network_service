@@ -46,6 +46,43 @@ bool run_command(const std::string &cmd, std::string &error) {
     return true;
 }
 
+bool pid_matches_udhcpc_iface(int pid, const std::string &iface) {
+#ifdef __linux__
+    if (pid <= 1 || !is_safe_iface(iface)) return false;
+
+    std::ifstream f("/proc/" + std::to_string(pid) + "/cmdline", std::ios::binary);
+    if (!f) return false;
+    const std::string cmdline((std::istreambuf_iterator<char>(f)),
+                              std::istreambuf_iterator<char>());
+    if (cmdline.empty()) return false;
+
+    bool has_udhcpc = false;
+    bool has_iface = false;
+    std::string previous;
+    std::size_t start = 0;
+    while (start < cmdline.size()) {
+        const std::size_t end = cmdline.find('\0', start);
+        const std::size_t count =
+            end == std::string::npos ? cmdline.size() - start : end - start;
+        const std::string arg = cmdline.substr(start, count);
+        if (!has_udhcpc && arg.find("udhcpc") != std::string::npos) {
+            has_udhcpc = true;
+        }
+        if (previous == "-i" && arg == iface) {
+            has_iface = true;
+        }
+        previous = arg;
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return has_udhcpc && has_iface;
+#else
+    (void)pid;
+    (void)iface;
+    return false;
+#endif
+}
+
 } // namespace
 
 std::string UdhcpcProcess::pidfile_for(const std::string &iface) {
@@ -59,7 +96,7 @@ void UdhcpcProcess::stop(const std::string &iface) {
     std::ifstream f(pidfile);
     int pid = -1;
     if (f >> pid) {
-        if (pid > 1) {
+        if (pid_matches_udhcpc_iface(pid, iface)) {
             (void)kill(pid, SIGTERM);
         }
     }
