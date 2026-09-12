@@ -134,6 +134,12 @@ if(BUILD_TESTING)
     target_link_libraries(network_ipc_v1_session_test PRIVATE NetworkService::IPC)
     add_test(NAME network_ipc_v1_session COMMAND network_ipc_v1_session_test)
 
+    add_executable(network_ipc_representation_test
+        tests/network_ipc_representation_test.cpp
+    )
+    target_link_libraries(network_ipc_representation_test PRIVATE NetworkService::IPC)
+    add_test(NAME network_ipc_representation COMMAND network_ipc_representation_test)
+
     add_executable(wifi_scan_lifecycle_test
         tests/wifi_scan_lifecycle_test.cpp
     )
