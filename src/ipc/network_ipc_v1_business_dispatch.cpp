@@ -2,12 +2,11 @@
 
 #include <cctype>
 #include <cstdint>
-#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <utility>
 
+#include "ipc/network_ipc_representation.h"
 #include "ipc/network_ipc_v1_codec.h"
 #include "service/network_daemon.h"
 
@@ -288,33 +287,6 @@ bool read_bool(std::string_view object, const char *key, bool *out) {
     return false;
 }
 
-std::string json_escape(const std::string &value) {
-    std::string out;
-    out.reserve(value.size() + 8);
-    for (unsigned char ch : value) {
-        switch (ch) {
-        case '\\': out += "\\\\"; break;
-        case '"': out += "\\\""; break;
-        case '\b': out += "\\b"; break;
-        case '\f': out += "\\f"; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default:
-            if (ch < 0x20U) {
-                static const char hex[] = "0123456789abcdef";
-                out += "\\u00";
-                out += hex[(ch >> 4U) & 0x0fU];
-                out += hex[ch & 0x0fU];
-            } else {
-                out.push_back(static_cast<char>(ch));
-            }
-            break;
-        }
-    }
-    return out;
-}
-
 std::vector<std::uint8_t> encode_response_payload(const std::string &payload) {
     CodecError error = CodecError::None;
     auto frame = encode_frame(MessageType::Response, payload, error);
@@ -330,56 +302,30 @@ std::vector<std::uint8_t> response_error(std::uint64_t request_id,
     os << "{\"requestId\":" << request_id
        << ",\"status\":" << status
        << ",\"error\":{\"code\":\"" << code
-       << "\",\"message\":\"" << json_escape(message) << "\"}}";
+       << "\",\"message\":\"" << ipc_representation::json_escape(message)
+       << "\"}}";
     return encode_response_payload(os.str());
 }
 
-bool parse_daemon_status(const std::string &json, int *status) {
-    if (status == nullptr) return false;
-    constexpr std::string_view prefix = "{\"status\":";
-    if (json.size() <= prefix.size() ||
-        std::string_view(json).substr(0, prefix.size()) != prefix) return false;
-    std::size_t pos = prefix.size();
-    int value = 0;
-    bool have_digit = false;
-    while (pos < json.size() && std::isdigit(static_cast<unsigned char>(json[pos]))) {
-        const int digit = json[pos++] - '0';
-        if (value > (std::numeric_limits<int>::max() - digit) / 10) return false;
-        value = value * 10 + digit;
-        have_digit = true;
-    }
-    if (!have_digit || pos >= json.size() || json[pos] != ',') return false;
-    *status = value;
-    return true;
+std::vector<std::uint8_t> response_success(std::uint64_t request_id,
+                                           int status,
+                                           const std::string &payload_json) {
+    std::ostringstream os;
+    os << "{\"requestId\":" << request_id
+       << ",\"status\":" << status
+       << ",\"result\":" << payload_json << "}";
+    return encode_response_payload(os.str());
 }
 
-std::vector<std::uint8_t> normalize_daemon_response(std::uint64_t request_id,
-                                                    const std::string &daemon_json) {
-    int status = 0;
-    if (!parse_daemon_status(daemon_json, &status)) {
-        return response_error(request_id, 500, "INTERNAL_ERROR",
-                              "NetworkDaemon returned an invalid response envelope");
+template <typename T>
+std::vector<std::uint8_t> operation_response(
+    std::uint64_t request_id,
+    const NetworkOperationResult<T> &result,
+    std::string (*payload_encoder)(const T &)) {
+    if (!result.ok()) {
+        return response_error(request_id, result.status, "OPERATION_FAILED", result.error);
     }
-
-    std::string_view raw;
-    if (status >= 200 && status < 300) {
-        if (!member(daemon_json, "result", &raw)) {
-            return response_error(request_id, 500, "INTERNAL_ERROR",
-                                  "NetworkDaemon success response is missing result");
-        }
-        std::ostringstream os;
-        os << "{\"requestId\":" << request_id
-           << ",\"status\":" << status << ",\"result\":" << raw << "}";
-        return encode_response_payload(os.str());
-    }
-
-    std::string message = "NetworkService operation failed";
-    if (member(daemon_json, "error", &raw)) {
-        JsonReader reader(raw);
-        std::string parsed;
-        if (reader.parse_full_string(&parsed)) message = std::move(parsed);
-    }
-    return response_error(request_id, status, "OPERATION_FAILED", message);
+    return response_success(request_id, result.status, payload_encoder(result.value));
 }
 
 std::vector<std::uint8_t> invalid_params(std::uint64_t request_id,
@@ -394,13 +340,17 @@ std::vector<std::uint8_t> dispatch_business_request(
     std::uint64_t request_id,
     const std::string &method,
     const std::string &params_json) {
-    std::string daemon_json;
-
     if (method == "eth.get_config") {
-        daemon_json = daemon.eth_get_config_json();
-    } else if (method == "eth.set_dhcp") {
-        daemon_json = daemon.eth_set_dhcp_json();
-    } else if (method == "eth.set_static") {
+        return operation_response(request_id,
+                                  daemon.eth_get_config(),
+                                  ipc_representation::ethernet_config_payload);
+    }
+    if (method == "eth.set_dhcp") {
+        return operation_response(request_id,
+                                  daemon.eth_set_dhcp(),
+                                  ipc_representation::ethernet_config_payload);
+    }
+    if (method == "eth.set_static") {
         std::string ip;
         std::string mask;
         std::string gateway;
@@ -412,19 +362,31 @@ std::vector<std::uint8_t> dispatch_business_request(
             return invalid_params(request_id,
                                   "eth.set_static requires string ip/mask/gateway/dns");
         }
-        daemon_json = daemon.eth_set_static_json(ip, mask, gateway, dns);
-    } else if (method == "wifi.scan.start") {
-        daemon_json = daemon.wifi_scan_start_json();
-    } else if (method == "wifi.scan.status") {
-        daemon_json = daemon.wifi_scan_status_json();
-    } else if (method == "wifi.set_enabled") {
+        return operation_response(request_id,
+                                  daemon.eth_set_static(ip, mask, gateway, dns),
+                                  ipc_representation::ethernet_config_payload);
+    }
+    if (method == "wifi.scan.start") {
+        return operation_response(request_id,
+                                  daemon.wifi_scan_start(),
+                                  ipc_representation::wifi_scan_status_payload);
+    }
+    if (method == "wifi.scan.status") {
+        return operation_response(request_id,
+                                  daemon.wifi_scan_status(),
+                                  ipc_representation::wifi_scan_status_payload);
+    }
+    if (method == "wifi.set_enabled") {
         bool enabled = false;
         if (!read_bool(params_json, "enabled", &enabled)) {
             return invalid_params(request_id,
                                   "wifi.set_enabled requires boolean enabled");
         }
-        daemon_json = daemon.wifi_set_enabled_json(enabled);
-    } else if (method == "wifi.connect") {
+        return operation_response(request_id,
+                                  daemon.wifi_set_enabled(enabled),
+                                  ipc_representation::wifi_enabled_payload);
+    }
+    if (method == "wifi.connect") {
         std::string ssid;
         std::string password;
         if (!read_string(params_json, "ssid", &ssid) || ssid.empty() ||
@@ -432,24 +394,36 @@ std::vector<std::uint8_t> dispatch_business_request(
             return invalid_params(request_id,
                                   "wifi.connect requires non-empty string ssid and string password");
         }
-        daemon_json = daemon.wifi_connect_json(ssid, password);
-    } else if (method == "wifi.connect_saved") {
+        return operation_response(request_id,
+                                  daemon.wifi_connect(ssid, password),
+                                  ipc_representation::wifi_command_payload);
+    }
+    if (method == "wifi.connect_saved") {
         std::string ssid;
         if (!read_string(params_json, "ssid", &ssid) || ssid.empty()) {
             return invalid_params(request_id,
                                   "wifi.connect_saved requires non-empty string ssid");
         }
-        daemon_json = daemon.wifi_connect_saved_json(ssid);
-    } else if (method == "wifi.saved_list") {
-        daemon_json = daemon.wifi_list_saved_json();
-    } else if (method == "wifi.forget") {
+        return operation_response(request_id,
+                                  daemon.wifi_connect_saved(ssid),
+                                  ipc_representation::wifi_command_payload);
+    }
+    if (method == "wifi.saved_list") {
+        return operation_response(request_id,
+                                  daemon.wifi_list_saved(),
+                                  ipc_representation::wifi_saved_payload);
+    }
+    if (method == "wifi.forget") {
         std::string ssid;
         if (!read_string(params_json, "ssid", &ssid) || ssid.empty()) {
             return invalid_params(request_id,
                                   "wifi.forget requires non-empty string ssid");
         }
-        daemon_json = daemon.wifi_forget_json(ssid);
-    } else if (method == "wifi.autoconnect") {
+        return operation_response(request_id,
+                                  daemon.wifi_forget(ssid),
+                                  ipc_representation::wifi_command_payload);
+    }
+    if (method == "wifi.autoconnect") {
         std::string ssid;
         bool enabled = false;
         if (!read_string(params_json, "ssid", &ssid) || ssid.empty() ||
@@ -457,14 +431,16 @@ std::vector<std::uint8_t> dispatch_business_request(
             return invalid_params(request_id,
                                   "wifi.autoconnect requires non-empty string ssid and boolean enabled");
         }
-        daemon_json = daemon.wifi_set_autoconnect_json(ssid, enabled);
-    } else if (method == "wifi.disconnect") {
-        daemon_json = daemon.wifi_disconnect_json();
-    } else {
-        return response_error(request_id, 404, "METHOD_NOT_FOUND", "unknown method");
+        return operation_response(request_id,
+                                  daemon.wifi_set_autoconnect(ssid, enabled),
+                                  ipc_representation::wifi_command_payload);
     }
-
-    return normalize_daemon_response(request_id, daemon_json);
+    if (method == "wifi.disconnect") {
+        return operation_response(request_id,
+                                  daemon.wifi_disconnect(),
+                                  ipc_representation::wifi_command_payload);
+    }
+    return response_error(request_id, 404, "METHOD_NOT_FOUND", "unknown method");
 }
 
 } // namespace ipc_v1
