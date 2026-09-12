@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "platform/wpa_ctrl_client.h"
+
 namespace network_service {
 
 namespace {
@@ -36,6 +38,22 @@ static std::string shell_quote(const std::string &value) {
     return out;
 }
 
+static bool wpa_quote(const std::string &value, std::string &quoted, std::string &error) {
+    quoted.clear();
+    quoted.push_back('"');
+    for (unsigned char ch : value) {
+        if (ch == '\0' || ch == '\n' || ch == '\r') {
+            error = "wpa value contains unsupported control characters";
+            quoted.clear();
+            return false;
+        }
+        if (ch == '\\' || ch == '"') quoted.push_back('\\');
+        quoted.push_back(static_cast<char>(ch));
+    }
+    quoted.push_back('"');
+    return true;
+}
+
 static std::string json_escape(const std::string &value) {
     std::string out;
     out.reserve(value.size() + 8);
@@ -61,26 +79,6 @@ static bool run_command(const std::string &cmd, std::string &error) {
         return false;
     }
     return true;
-}
-
-static std::string read_command(const std::string &cmd, std::string &error) {
-    FILE *fp = popen(cmd.c_str(), "r");
-    if (!fp) {
-        error = "popen failed";
-        return {};
-    }
-    std::string output;
-    char buffer[512];
-    while (fgets(buffer, sizeof(buffer), fp)) {
-        output += buffer;
-    }
-    int rc = pclose(fp);
-    if (rc != 0 && output.empty()) {
-        std::ostringstream os;
-        os << "command failed rc=" << rc << ": " << cmd;
-        error = os.str();
-    }
-    return output;
 }
 
 static std::string trim(const std::string &value) {
@@ -172,19 +170,30 @@ static bool start_wifi_dhcp(const std::string &iface, std::string &error) {
     return run_command(os.str(), error);
 }
 
-static bool wpa_cli_ok(const std::string &iface, const std::string &args, std::string &error) {
+static bool wpa_request(const std::string &iface,
+                        const std::string &command,
+                        std::string &reply,
+                        std::string &error) {
     if (!is_safe_iface(iface)) {
         error = "invalid wifi iface";
         return false;
     }
-    std::string output = read_command("wpa_cli -i " + iface + " " + args + " 2>/dev/null", error);
-    std::string normalized = trim(output);
-    if (normalized == "OK" || normalized.find("OK\n") != std::string::npos) {
+    WpaCtrlClient ctrl(wpa_ctrl_path_for(iface));
+    if (!ctrl.request(command, reply, error)) return false;
+    return true;
+}
+
+static bool wpa_ok(const std::string &iface,
+                   const std::string &command,
+                   std::string &error) {
+    std::string reply;
+    if (!wpa_request(iface, command, reply, error)) return false;
+    const std::string normalized = trim(reply);
+    if (normalized == "OK") {
+        error.clear();
         return true;
     }
-    if (error.empty()) {
-        error = "wpa_cli returned: " + normalized;
-    }
+    error = "wpa_supplicant returned: " + normalized;
     return false;
 }
 
@@ -198,11 +207,12 @@ static int parse_network_id(const std::string &value) {
 }
 
 static int wpa_add_network(const std::string &iface, std::string &error) {
-    std::string output = trim(read_command("wpa_cli -i " + iface + " add_network 2>/dev/null", error));
-    if (output.empty()) return -1;
-    int id = parse_network_id(output);
+    std::string reply;
+    if (!wpa_request(iface, "ADD_NETWORK", reply, error)) return -1;
+    const std::string normalized = trim(reply);
+    int id = parse_network_id(normalized);
     if (id < 0 && error.empty()) {
-        error = "invalid add_network result: " + output;
+        error = "invalid ADD_NETWORK result: " + normalized;
     }
     return id;
 }
@@ -242,8 +252,9 @@ static std::vector<WifiSavedNetwork> parse_saved_networks(const std::string &out
 }
 
 static int find_saved_network_id(const std::string &iface, const std::string &ssid, std::string &error) {
-    std::string output = read_command("wpa_cli -i " + iface + " list_networks 2>/dev/null", error);
-    std::vector<WifiSavedNetwork> records = parse_saved_networks(output);
+    std::string reply;
+    if (!wpa_request(iface, "LIST_NETWORKS", reply, error)) return -1;
+    std::vector<WifiSavedNetwork> records = parse_saved_networks(reply);
     for (const auto &record : records) {
         if (record.ssid == ssid) {
             return record.network_id;
@@ -270,7 +281,9 @@ bool wifi_set_enabled(const std::string &iface, bool enabled, std::string &error
     }
     if (enabled) {
         if (!run_command("ifconfig " + iface + " up", error)) return false;
-        (void)wpa_cli_ok(iface, "reconnect", error);
+        std::string ignored;
+        (void)wpa_ok(iface, "RECONNECT", ignored);
+        error.clear();
         return true;
     }
     (void)wifi_disconnect(iface, error);
@@ -283,9 +296,11 @@ bool wifi_disconnect(const std::string &iface, std::string &error) {
         return false;
     }
     stop_dhcp_for_iface(iface);
-    (void)wpa_cli_ok(iface, "disconnect", error);
+    std::string ignored;
+    (void)wpa_ok(iface, "DISCONNECT", ignored);
     (void)system(("route del default dev " + iface + " 2>/dev/null").c_str());
     (void)system(("ifconfig " + iface + " 0.0.0.0 2>/dev/null").c_str());
+    error.clear();
     return true;
 }
 
@@ -306,27 +321,36 @@ bool wifi_connect(const std::string &iface,
     int id = wpa_add_network(iface, error);
     if (id < 0) return false;
 
-    std::string quoted_ssid = "\\\"" + ssid + "\\\"";
-    if (!wpa_cli_ok(iface, "set_network " + std::to_string(id) + " ssid " + shell_quote(quoted_ssid), error)) {
+    std::string quoted_ssid;
+    if (!wpa_quote(ssid, quoted_ssid, error)) return false;
+    if (!wpa_ok(iface,
+                "SET_NETWORK " + std::to_string(id) + " ssid " + quoted_ssid,
+                error)) {
         return false;
     }
 
     if (password.empty()) {
-        if (!wpa_cli_ok(iface, "set_network " + std::to_string(id) + " key_mgmt NONE", error)) {
+        if (!wpa_ok(iface,
+                    "SET_NETWORK " + std::to_string(id) + " key_mgmt NONE",
+                    error)) {
             return false;
         }
     } else {
-        std::string quoted_psk = "\\\"" + password + "\\\"";
-        if (!wpa_cli_ok(iface, "set_network " + std::to_string(id) + " psk " + shell_quote(quoted_psk), error)) {
+        std::string quoted_psk;
+        if (!wpa_quote(password, quoted_psk, error)) return false;
+        if (!wpa_ok(iface,
+                    "SET_NETWORK " + std::to_string(id) + " psk " + quoted_psk,
+                    error)) {
             return false;
         }
     }
 
-    (void)wpa_cli_ok(iface, "disable_network all", error);
-    if (!wpa_cli_ok(iface, "enable_network " + std::to_string(id), error)) return false;
-    if (!wpa_cli_ok(iface, "select_network " + std::to_string(id), error)) return false;
-    (void)wpa_cli_ok(iface, "save_config", error);
-
+    std::string ignored;
+    (void)wpa_ok(iface, "DISABLE_NETWORK all", ignored);
+    if (!wpa_ok(iface, "ENABLE_NETWORK " + std::to_string(id), error)) return false;
+    if (!wpa_ok(iface, "SELECT_NETWORK " + std::to_string(id), error)) return false;
+    (void)wpa_ok(iface, "SAVE_CONFIG", ignored);
+    error.clear();
     return true;
 }
 
@@ -342,9 +366,10 @@ bool wifi_connect_saved(const std::string &iface, const std::string &ssid, std::
     if (!run_command("ifconfig " + iface + " up", error)) return false;
     int id = find_saved_network_id(iface, ssid, error);
     if (id < 0) return false;
-    (void)wpa_cli_ok(iface, "disable_network all", error);
-    if (!wpa_cli_ok(iface, "enable_network " + std::to_string(id), error)) return false;
-    if (!wpa_cli_ok(iface, "select_network " + std::to_string(id), error)) return false;
+    std::string ignored;
+    (void)wpa_ok(iface, "DISABLE_NETWORK all", ignored);
+    if (!wpa_ok(iface, "ENABLE_NETWORK " + std::to_string(id), error)) return false;
+    if (!wpa_ok(iface, "SELECT_NETWORK " + std::to_string(id), error)) return false;
     return true;
 }
 
@@ -355,8 +380,8 @@ bool wifi_forget_saved(const std::string &iface, const std::string &ssid, std::s
     }
     int id = find_saved_network_id(iface, ssid, error);
     if (id < 0) return false;
-    if (!wpa_cli_ok(iface, "remove_network " + std::to_string(id), error)) return false;
-    return wpa_cli_ok(iface, "save_config", error);
+    if (!wpa_ok(iface, "REMOVE_NETWORK " + std::to_string(id), error)) return false;
+    return wpa_ok(iface, "SAVE_CONFIG", error);
 }
 
 bool wifi_set_autoconnect(const std::string &iface,
@@ -369,12 +394,12 @@ bool wifi_set_autoconnect(const std::string &iface,
     }
     int id = find_saved_network_id(iface, ssid, error);
     if (id < 0) return false;
-    if (!wpa_cli_ok(iface,
-                    std::string(enabled ? "enable_network " : "disable_network ") + std::to_string(id),
-                    error)) {
+    if (!wpa_ok(iface,
+                std::string(enabled ? "ENABLE_NETWORK " : "DISABLE_NETWORK ") + std::to_string(id),
+                error)) {
         return false;
     }
-    return wpa_cli_ok(iface, "save_config", error);
+    return wpa_ok(iface, "SAVE_CONFIG", error);
 }
 
 static std::vector<WifiApRecord> parse_scan_results(const std::string &output) {
@@ -411,7 +436,7 @@ bool wifi_scan_start(const std::string &iface, std::string &error) {
     if (!run_command("ifconfig " + iface + " up", error)) {
         return false;
     }
-    return wpa_cli_ok(iface, "scan", error);
+    return wpa_ok(iface, "SCAN", error);
 }
 
 std::vector<WifiApRecord> wifi_scan_results(const std::string &iface, std::string &error) {
@@ -420,9 +445,9 @@ std::vector<WifiApRecord> wifi_scan_results(const std::string &iface, std::strin
         error = "invalid wifi iface";
         return {};
     }
-    std::string output = read_command("wpa_cli -i " + iface + " scan_results 2>/dev/null", error);
-    if (!error.empty() && output.empty()) return {};
-    return parse_scan_results(output);
+    std::string reply;
+    if (!wpa_request(iface, "SCAN_RESULTS", reply, error)) return {};
+    return parse_scan_results(reply);
 }
 
 std::vector<WifiApRecord> wifi_scan(const std::string &iface, std::string &error) {
@@ -434,7 +459,7 @@ std::vector<WifiApRecord> wifi_scan(const std::string &iface, std::string &error
     if (!run_command("ifconfig " + iface + " up", error)) {
         return records;
     }
-    (void)wpa_cli_ok(iface, "scan", error);
+    if (!wpa_ok(iface, "SCAN", error)) return records;
     usleep(1200 * 1000);
     return wifi_scan_results(iface, error);
 }
@@ -444,8 +469,9 @@ std::vector<WifiSavedNetwork> wifi_list_saved(const std::string &iface, std::str
         error = "invalid wifi iface";
         return {};
     }
-    std::string output = read_command("wpa_cli -i " + iface + " list_networks 2>/dev/null", error);
-    return parse_saved_networks(output);
+    std::string reply;
+    if (!wpa_request(iface, "LIST_NETWORKS", reply, error)) return {};
+    return parse_saved_networks(reply);
 }
 
 std::string wifi_scan_to_json(const std::vector<WifiApRecord> &records) {
