@@ -131,7 +131,9 @@ bool NetworkControlPlane::apply_ethernet_static(const std::string &ip4,
 
 bool NetworkControlPlane::reconcile_link_locked(const std::string &iface,
                                                 LinkState &state,
+                                                bool &changed,
                                                 std::string &error) {
+    changed = false;
     if (!state.managed_dhcp) return true;
     if (!ops_.read_lease) {
         error = "DHCP lease reader is unavailable";
@@ -158,6 +160,7 @@ bool NetworkControlPlane::reconcile_link_locked(const std::string &iface,
         state.active = false;
         state.lease = fact;
         state.fingerprint = fingerprint;
+        changed = true;
         return true;
     }
 
@@ -186,14 +189,24 @@ bool NetworkControlPlane::reconcile_link_locked(const std::string &iface,
     state.active = true;
     state.lease = fact;
     state.fingerprint = fingerprint;
+    changed = true;
     return true;
 }
 
 bool NetworkControlPlane::reconcile(std::string &error) {
     std::lock_guard<std::mutex> guard(lock_);
     error.clear();
-    if (!reconcile_link_locked(eth_iface_, eth_, error)) return false;
-    if (!reconcile_link_locked(wifi_iface_, wifi_, error)) return false;
+    bool eth_changed = false;
+    bool wifi_changed = false;
+    if (!reconcile_link_locked(eth_iface_, eth_, eth_changed, error)) return false;
+    if (!reconcile_link_locked(wifi_iface_, wifi_, wifi_changed, error)) return false;
+    if (!eth_changed && !wifi_changed) return true;
+    return recompute_dns_locked(error);
+}
+
+bool NetworkControlPlane::refresh_external_state(std::string &error) {
+    std::lock_guard<std::mutex> guard(lock_);
+    error.clear();
     return recompute_dns_locked(error);
 }
 
