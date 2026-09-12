@@ -1,6 +1,7 @@
 #ifndef NETWORK_SERVICE_DAEMON_H
 #define NETWORK_SERVICE_DAEMON_H
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -29,13 +30,16 @@ public:
     // Fast DHCP lease-fact reconciliation. Does not perform periodic full-state
     // observation when lease facts are unchanged.
     bool reconcile(std::string &error);
+    bool reconcile(bool &changed, std::string &error);
 
     // Refresh policy that depends on externally-managed route/DNS state.
     bool refresh_external_state(std::string &error);
 
-    // Service facade for the reactor. IPC does not depend on Netlink types.
+    // Service facade for reactor-owned event handling. IPC remains independent
+    // of Netlink/WPA implementation types.
     int network_event_fd() const;
     bool consume_network_events(bool &changed, std::string &error);
+    bool consume_runtime_state_dirty();
 
     NetworkSnapshot snapshot() const;
     std::string snapshot_result_json() const;
@@ -69,6 +73,7 @@ private:
     std::unique_ptr<WpaEventMonitor> wpa_monitor_;
     std::unique_ptr<WifiScanLifecycle> wifi_scan_lifecycle_;
     std::unique_ptr<NetlinkMonitor> netlink_monitor_;
+    std::atomic<bool> runtime_state_dirty_{false};
 };
 
 } // namespace network_service
