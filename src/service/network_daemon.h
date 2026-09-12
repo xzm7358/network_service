@@ -6,16 +6,20 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "config/ethernet_config.h"
 #include "network_service_types.h"
+#include "platform/wifi_backend.h"
+#include "platform/wpa_event_monitor.h"
+#include "service/network_operation_result.h"
+#include "service/wifi_scan_lifecycle.h"
 
 namespace network_service {
 
 class NetlinkMonitor;
 class NetworkControlPlane;
 class WifiManager;
-class WpaEventMonitor;
-class WifiScanLifecycle;
 
 class NetworkDaemon {
 public:
@@ -42,27 +46,28 @@ public:
     bool consume_network_events(bool &changed, std::string &error);
     bool consume_runtime_state_dirty();
 
+    // Typed Service API. Representation/JSON ownership belongs exclusively to IPC.
     NetworkSnapshot snapshot() const;
-    std::string snapshot_result_json() const;
-    std::string snapshot_json() const;
-    std::string ping_json() const;
-    std::string wpa_events_json() const;
-    std::string eth_get_config_json() const;
-    std::string eth_set_dhcp_json() const;
-    std::string eth_set_static_json(const std::string &ip,
-                                    const std::string &mask,
-                                    const std::string &gateway,
-                                    const std::string &dns) const;
-    std::string wifi_scan_json() const;
-    std::string wifi_scan_start_json();
-    std::string wifi_scan_status_json();
-    std::string wifi_set_enabled_json(bool enabled) const;
-    std::string wifi_connect_json(const std::string &ssid, const std::string &password) const;
-    std::string wifi_connect_saved_json(const std::string &ssid) const;
-    std::string wifi_list_saved_json() const;
-    std::string wifi_forget_json(const std::string &ssid) const;
-    std::string wifi_set_autoconnect_json(const std::string &ssid, bool enabled) const;
-    std::string wifi_disconnect_json() const;
+    PingInfo ping() const;
+    NetworkOperationResult<WpaEventSnapshot> wpa_events() const;
+    NetworkOperationResult<EthernetConfig> eth_get_config() const;
+    NetworkOperationResult<EthernetConfig> eth_set_dhcp() const;
+    NetworkOperationResult<EthernetConfig> eth_set_static(const std::string &ip,
+                                                          const std::string &mask,
+                                                          const std::string &gateway,
+                                                          const std::string &dns) const;
+    NetworkOperationResult<std::vector<WifiApRecord>> wifi_scan() const;
+    NetworkOperationResult<WifiScanStatus> wifi_scan_start();
+    NetworkOperationResult<WifiScanStatus> wifi_scan_status();
+    NetworkOperationResult<WifiEnabledResult> wifi_set_enabled(bool enabled) const;
+    NetworkOperationResult<WifiCommandResult> wifi_connect(const std::string &ssid,
+                                                           const std::string &password) const;
+    NetworkOperationResult<WifiCommandResult> wifi_connect_saved(const std::string &ssid) const;
+    NetworkOperationResult<std::vector<WifiSavedNetwork>> wifi_list_saved() const;
+    NetworkOperationResult<WifiCommandResult> wifi_forget(const std::string &ssid) const;
+    NetworkOperationResult<WifiCommandResult> wifi_set_autoconnect(const std::string &ssid,
+                                                                   bool enabled) const;
+    NetworkOperationResult<WifiCommandResult> wifi_disconnect() const;
 
 private:
     std::string eth_iface_;
