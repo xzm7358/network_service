@@ -119,6 +119,11 @@ if(BUILD_TESTING OR NETWORK_SERVICE_BUILD_RC_PROBE)
 endif()
 
 if(BUILD_TESTING)
+    add_test(NAME route_ownership_guard
+        COMMAND ${CMAKE_COMMAND}
+            -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/route_ownership_guard.cmake)
+
     add_executable(network_ipc_v1_codec_test
         tests/network_ipc_v1_codec_test.cpp
     )
