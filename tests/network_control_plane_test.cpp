@@ -61,10 +61,14 @@ struct FakePlatform {
         };
         out.set_dns = [this](const std::string &dns, std::string &) {
             dns_writes.push_back(dns);
+            snapshot.dns4 = dns;
+            snapshot.dns_available = !dns.empty();
             return true;
         };
         out.clear_dns = [this](std::string &) {
             ++dns_clears;
+            snapshot.dns4.clear();
+            snapshot.dns_available = false;
             return true;
         };
         out.snapshot = [this]() { return snapshot; };
@@ -88,6 +92,7 @@ network_service::DhcpLeaseFact lease(const std::string &iface,
     network_service::DhcpLeaseFact out;
     out.event = network_service::DhcpLeaseEvent::Bound;
     out.iface = iface;
+    out.generation = "test";
     out.ip4 = ip;
     out.netmask4 = "255.255.255.0";
     out.gateway4 = gateway;
@@ -170,6 +175,7 @@ int main() {
     network_service::DhcpLeaseFact deconfig;
     deconfig.event = network_service::DhcpLeaseEvent::Deconfig;
     deconfig.iface = "eth0";
+    deconfig.generation = "test";
     failover.leases["eth0"] = deconfig;
     failover.reset_observations();
     ok = expect(failover_plane.reconcile(error), "eth deconfig reconcile failed") && ok;
@@ -180,6 +186,8 @@ int main() {
 
     FakePlatform protected_eth;
     protected_eth.snapshot.eth.has_default_route = true;
+    protected_eth.snapshot.dns4 = "4.4.4.4";
+    protected_eth.snapshot.dns_available = true;
     NetworkControlPlane protected_plane("eth0", "wlan0", protected_eth.ops());
     ok = expect(protected_plane.start_dhcp("wlan0", error), "protected wifi start failed") && ok;
     protected_eth.reset_observations();
@@ -187,6 +195,43 @@ int main() {
     ok = expect(protected_plane.reconcile(error), "protected eth reconcile failed") && ok;
     ok = expect(protected_eth.dns_writes.empty(),
                 "unmanaged live Ethernet route must prevent Wi-Fi DNS overwrite") && ok;
+
+    // Start with Wi-Fi as the only route, then let an externally-managed
+    // Ethernet route recover. NetworkService must relinquish its DNS ownership
+    // instead of leaving Wi-Fi DNS sticky under EthernetPreferred.
+    FakePlatform recovery;
+    NetworkControlPlane recovery_plane("eth0", "wlan0", recovery.ops());
+    ok = expect(recovery_plane.start_dhcp("wlan0", error), "recovery wifi start failed") && ok;
+    recovery.reset_observations();
+    recovery.leases["wlan0"] = lease("wlan0", "10.0.0.50", "10.0.0.1", "8.8.8.8");
+    ok = expect(recovery_plane.reconcile(error), "recovery wifi reconcile failed") && ok;
+    ok = expect(!recovery.dns_writes.empty() && recovery.dns_writes.back() == "8.8.8.8",
+                "Wi-Fi must own DNS while Ethernet route is absent") && ok;
+
+    recovery.reset_observations();
+    recovery.snapshot.eth.has_default_route = true;
+    ok = expect(recovery_plane.reconcile(error), "external Ethernet recovery failed") && ok;
+    ok = expect(recovery.dns_clears == 1,
+                "external Ethernet recovery must relinquish managed Wi-Fi DNS") && ok;
+    ok = expect(recovery.dns_writes.empty(),
+                "external Ethernet recovery must not install another managed DNS") && ok;
+
+    // Once the external owner has installed its own DNS, another reconcile must
+    // not clear or overwrite it.
+    recovery.reset_observations();
+    recovery.snapshot.dns4 = "4.4.4.4";
+    recovery.snapshot.dns_available = true;
+    ok = expect(recovery_plane.reconcile(error), "external DNS preservation failed") && ok;
+    ok = expect(recovery.dns_clears == 0 && recovery.dns_writes.empty(),
+                "external DNS must remain untouched while Ethernet owns the route") && ok;
+
+    // If external Ethernet disappears again, Wi-Fi becomes primary and its DNS
+    // must be actively restored rather than skipped because of stale cache.
+    recovery.reset_observations();
+    recovery.snapshot.eth.has_default_route = false;
+    ok = expect(recovery_plane.reconcile(error), "Wi-Fi DNS reacquire failed") && ok;
+    ok = expect(!recovery.dns_writes.empty() && recovery.dns_writes.back() == "8.8.8.8",
+                "Wi-Fi DNS must be restored after external Ethernet disappears") && ok;
 
     return ok ? 0 : 1;
 }
