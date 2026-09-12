@@ -135,8 +135,9 @@ WpaEventSnapshot WpaEventMonitor::snapshot() const {
     return snapshot_;
 }
 
-void WpaEventMonitor::update_event(const std::string &event) {
+WifiL2State WpaEventMonitor::update_event(const std::string &event, bool &l2_changed) {
     std::lock_guard<std::mutex> guard(lock_);
+    l2_changed = false;
     snapshot_.last_event = event;
     ++snapshot_.event_sequence;
     if (snapshot_.event_sequence == 0) ++snapshot_.event_sequence;
@@ -163,6 +164,7 @@ void WpaEventMonitor::update_event(const std::string &event) {
 
     WifiL2State l2 = WifiL2State::Unknown;
     if (l2_state_for_event(event, l2)) {
+        l2_changed = snapshot_.l2_state != l2;
         snapshot_.l2_state = l2;
         snapshot_.wifi_state = legacy_state_for_l2(l2);
     }
@@ -185,6 +187,7 @@ void WpaEventMonitor::update_event(const std::string &event) {
         snapshot_.disconnected = false;
         snapshot_.failure_reason = failure_reason_for_event(event);
     }
+    return snapshot_.l2_state;
 }
 
 void WpaEventMonitor::run() {
@@ -223,13 +226,11 @@ void WpaEventMonitor::run() {
             std::string event;
             if (!ctrl.receive(event, error)) break;
             const std::string normalized = normalize_event(event);
-            update_event(normalized);
+            bool l2_changed = false;
+            const WifiL2State l2_state = update_event(normalized, l2_changed);
 
-            if (!link_state_handler_) continue;
-            if (normalized.find("CTRL-EVENT-CONNECTED") != std::string::npos) {
-                link_state_handler_(true);
-            } else if (normalized.find("CTRL-EVENT-DISCONNECTED") != std::string::npos) {
-                link_state_handler_(false);
+            if (l2_changed && link_state_handler_) {
+                link_state_handler_(l2_state);
             }
         }
 
