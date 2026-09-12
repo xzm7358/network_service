@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "platform/udhcpc_process.h"
 #include "platform/wpa_ctrl_client.h"
 
 namespace network_service {
@@ -23,19 +24,6 @@ static bool is_safe_iface(const std::string &value) {
         }
     }
     return true;
-}
-
-static std::string shell_quote(const std::string &value) {
-    std::string out = "'";
-    for (char ch : value) {
-        if (ch == '\'') {
-            out += "'\\''";
-        } else {
-            out += ch;
-        }
-    }
-    out += "'";
-    return out;
 }
 
 static bool wpa_quote(const std::string &value, std::string &quoted, std::string &error) {
@@ -108,26 +96,8 @@ static std::vector<std::string> split_tab_line(const std::string &line) {
     return fields;
 }
 
-static std::string dhcp_pidfile(const std::string &iface) {
-    return "/tmp/smart_hmi_udhcpc_" + iface + ".pid";
-}
-
 static std::string dhcp_script_path() {
     return "/tmp/smart_hmi_udhcpc_wifi_network_service.script";
-}
-
-static void stop_dhcp_for_iface(const std::string &iface) {
-    std::ifstream f(dhcp_pidfile(iface));
-    int pid = -1;
-    if (f >> pid) {
-        if (pid > 1) {
-            char cmd[128];
-            snprintf(cmd, sizeof(cmd), "kill %d 2>/dev/null", pid);
-            (void)system(cmd);
-        }
-    }
-    std::string rm = "rm -f " + dhcp_pidfile(iface);
-    (void)system(rm.c_str());
 }
 
 static bool ensure_dhcp_script(std::string &error) {
@@ -162,12 +132,7 @@ static bool ensure_dhcp_script(std::string &error) {
 
 static bool start_wifi_dhcp(const std::string &iface, std::string &error) {
     if (!ensure_dhcp_script(error)) return false;
-    stop_dhcp_for_iface(iface);
-    std::ostringstream os;
-    os << "udhcpc -i " << iface
-       << " -t 15 -n -p " << shell_quote(dhcp_pidfile(iface))
-       << " -s " << shell_quote(dhcp_script_path()) << " &";
-    return run_command(os.str(), error);
+    return UdhcpcProcess::start(iface, dhcp_script_path(), error);
 }
 
 static bool wpa_request(const std::string &iface,
@@ -295,7 +260,7 @@ bool wifi_disconnect(const std::string &iface, std::string &error) {
         error = "invalid wifi iface";
         return false;
     }
-    stop_dhcp_for_iface(iface);
+    UdhcpcProcess::stop(iface);
     std::string ignored;
     (void)wpa_ok(iface, "DISCONNECT", ignored);
     (void)system(("route del default dev " + iface + " 2>/dev/null").c_str());
