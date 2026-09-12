@@ -18,7 +18,7 @@ struct NetworkControlPlaneOps {
     std::function<bool(const std::string &, const std::string &, const std::string &, std::string &)> apply_ipv4;
     std::function<bool(const std::string &, std::string &)> clear_ipv4;
     std::function<bool(const std::string &, const std::string &, int, std::string &)> set_default_route;
-    std::function<void(const std::string &)> clear_default_route;
+    std::function<bool(const std::string &, const std::string &, int, std::string &)> clear_default_route;
     std::function<bool(const std::string &, std::string &)> set_dns;
     std::function<bool(std::string &)> clear_dns;
     std::function<NetworkSnapshot()> snapshot;
@@ -69,9 +69,22 @@ private:
         int manual_metric = 10;
     };
 
+    struct OwnedRouteState {
+        bool active = false;
+        std::string gateway4;
+        int metric = -1;
+    };
+
     bool known_iface(const std::string &iface) const;
     LinkState &link_for(const std::string &iface);
     const LinkState &link_for(const std::string &iface) const;
+    OwnedRouteState &owned_route_for(const std::string &iface);
+    bool ensure_owned_route_locked(const std::string &iface,
+                                   const std::string &gateway4,
+                                   int metric,
+                                   std::string &error);
+    bool clear_owned_route_locked(const std::string &iface,
+                                  std::string &error);
     bool reconcile_link_locked(const std::string &iface,
                                LinkState &state,
                                bool &changed,
@@ -89,6 +102,8 @@ private:
     LinkState eth_;
     LinkState wifi_;
     StaticEthernetState static_eth_;
+    OwnedRouteState eth_route_;
+    OwnedRouteState wifi_route_;
     RoutePolicy route_policy_ = RoutePolicy::EthernetPreferred;
     bool managed_dns_ = false;
     std::string last_dns_;
