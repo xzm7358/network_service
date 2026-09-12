@@ -259,5 +259,104 @@ int main() {
     ok = expect(!adoption.dns_writes.empty() && adoption.dns_writes.back() == "9.9.9.9",
                 "adopted lease did not converge DNS") && ok;
 
+    // Netlink/external observation repair: once a lease is active, missing owned
+    // IP/default-route state must be restored even though the lease fingerprint
+    // itself has not changed.
+    FakePlatform repair;
+    NetworkControlPlane repair_plane("eth0", "wlan0", repair.ops());
+    ok = expect(repair_plane.start_dhcp("wlan0", error), "repair wifi start failed") && ok;
+    repair.leases["wlan0"] = lease("wlan0", "10.0.0.70", "10.0.0.1", "8.8.8.8");
+    ok = expect(repair_plane.reconcile(error), "repair initial lease reconcile failed") && ok;
+
+    repair.snapshot.wifi.iface = "wlan0";
+    repair.snapshot.wifi.exists = true;
+    repair.snapshot.wifi.has_ip = true;
+    repair.snapshot.wifi.ip4 = "10.0.0.70";
+    repair.snapshot.wifi.netmask4 = "255.255.255.0";
+    repair.snapshot.wifi.has_default_route = true;
+    repair.snapshot.wifi.gateway4 = "10.0.0.1";
+    repair.snapshot.wifi.route_metric = 20;
+    repair.snapshot.dns4 = "8.8.8.8";
+    repair.snapshot.dns_available = true;
+    repair.reset_observations();
+    ok = expect(repair_plane.refresh_external_state(error),
+                "healthy owned-state refresh failed") && ok;
+    ok = expect(repair.ip_applies.empty() && repair.routes.empty(),
+                "healthy owned state must not be re-applied") && ok;
+
+    repair.snapshot.wifi.has_default_route = false;
+    repair.reset_observations();
+    ok = expect(repair_plane.refresh_external_state(error),
+                "missing-route repair failed") && ok;
+    ok = expect(repair.routes.size() == 1 &&
+                std::get<0>(repair.routes.back()) == "wlan0" &&
+                std::get<1>(repair.routes.back()) == "10.0.0.1" &&
+                std::get<2>(repair.routes.back()) == 20,
+                "missing owned Wi-Fi default route was not restored") && ok;
+
+    repair.snapshot.wifi.has_default_route = true;
+    repair.snapshot.wifi.gateway4 = "10.0.0.1";
+    repair.snapshot.wifi.route_metric = 20;
+    repair.snapshot.wifi.has_ip = false;
+    repair.snapshot.wifi.ip4.clear();
+    repair.snapshot.wifi.netmask4.clear();
+    repair.reset_observations();
+    ok = expect(repair_plane.refresh_external_state(error),
+                "missing-IP repair failed") && ok;
+    ok = expect(repair.ip_applies.size() == 1 &&
+                repair.ip_applies.back() == "wlan0=10.0.0.70",
+                "missing owned Wi-Fi IPv4 was not restored") && ok;
+
+    // Until route identity is implemented, a different live route on the same
+    // interface is preserved rather than destructively replaced.
+    repair.snapshot.wifi.has_ip = true;
+    repair.snapshot.wifi.ip4 = "10.0.0.70";
+    repair.snapshot.wifi.netmask4 = "255.255.255.0";
+    repair.snapshot.wifi.has_default_route = true;
+    repair.snapshot.wifi.gateway4 = "192.0.2.1";
+    repair.snapshot.wifi.route_metric = 99;
+    repair.reset_observations();
+    ok = expect(repair_plane.refresh_external_state(error),
+                "foreign-route preservation refresh failed") && ok;
+    ok = expect(repair.routes.empty() && repair.route_clears.empty(),
+                "F-04 must not replace/delete a different live route") && ok;
+
+    // DELLINK/driver disappearance is not a Service repair target. Avoid a 250ms
+    // mutation loop against an interface that no longer exists.
+    repair.snapshot.wifi.exists = false;
+    repair.snapshot.wifi.has_ip = false;
+    repair.snapshot.wifi.has_default_route = false;
+    repair.reset_observations();
+    ok = expect(repair_plane.refresh_external_state(error),
+                "missing-interface refresh failed") && ok;
+    ok = expect(repair.ip_applies.empty() && repair.routes.empty(),
+                "missing interface must not trigger owned-state mutation") && ok;
+
+    // Static Ethernet owns an IPv4 desired fact too; preserve enough desired
+    // state to restore an externally removed address.
+    FakePlatform static_repair;
+    NetworkControlPlane static_plane("eth0", "wlan0", static_repair.ops());
+    ok = expect(static_plane.apply_ethernet_static("192.168.50.20",
+                                                   "255.255.255.0",
+                                                   "192.168.50.1",
+                                                   "1.1.1.1",
+                                                   10,
+                                                   error),
+                "static repair setup failed") && ok;
+    static_repair.snapshot.eth.iface = "eth0";
+    static_repair.snapshot.eth.exists = true;
+    static_repair.snapshot.eth.has_ip = false;
+    static_repair.snapshot.eth.has_default_route = true;
+    static_repair.snapshot.eth.gateway4 = "192.168.50.1";
+    static_repair.snapshot.eth.route_metric = 10;
+    static_repair.snapshot.dns4 = "1.1.1.1";
+    static_repair.snapshot.dns_available = true;
+    static_repair.reset_observations();
+    ok = expect(static_plane.refresh_external_state(error),
+                "static IPv4 repair failed") && ok;
+    ok = expect(static_repair.ip_applies.size() == 1 &&
+                static_repair.ip_applies.back() == "eth0=192.168.50.20",
+                "missing owned static IPv4 was not restored") && ok;
+
     return ok ? 0 : 1;
 }
