@@ -13,11 +13,16 @@ public:
                            std::string &error);
     static bool clear_ipv4(const std::string &iface, std::string &error);
 
+    // Ensure/delete only the exact default-route identity. These operations must
+    // never remove a different route merely because it shares the interface.
     static bool set_default_route(const std::string &iface,
                                   const std::string &gateway4,
                                   int metric,
                                   std::string &error);
-    static void clear_default_route(const std::string &iface);
+    static bool clear_default_route(const std::string &iface,
+                                    const std::string &gateway4,
+                                    int metric,
+                                    std::string &error);
 
     static bool set_primary_dns(const std::string &dns4, std::string &error);
     static bool clear_dns(std::string &error);
