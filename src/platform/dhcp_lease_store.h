@@ -15,6 +15,7 @@ enum class DhcpLeaseEvent {
 struct DhcpLeaseFact {
     DhcpLeaseEvent event = DhcpLeaseEvent::None;
     std::string iface;
+    std::string generation;
     std::string ip4;
     std::string netmask4;
     std::string gateway4;
@@ -26,7 +27,18 @@ struct DhcpLeaseFact {
 
 class DhcpLeaseStore {
 public:
-    static std::string path_for(const std::string &iface);
+    static std::string path_for(const std::string &iface,
+                                const std::string &generation);
+    static std::string generation_path_for(const std::string &iface);
+
+    static bool activate_generation(const std::string &iface,
+                                    const std::string &generation,
+                                    std::string &error);
+    static bool active_generation(const std::string &iface,
+                                  std::string &generation,
+                                  bool &exists,
+                                  std::string &error);
+
     static bool read(const std::string &iface,
                      DhcpLeaseFact &fact,
                      bool &exists,
