@@ -277,7 +277,8 @@ bool NetworkControlPlane::recompute_dns_locked(std::string &error) {
     case RoutePolicy::ManualMetric: {
         const int eth_metric = route_metric(eth_iface_, static_eth_.manual_metric);
         const int wifi_metric = route_metric(wifi_iface_);
-        if (wifi_route && (!static_eth_route && !dhcp_eth_route || wifi_metric < eth_metric)) {
+        if (wifi_route &&
+            ((!static_eth_route && !dhcp_eth_route) || wifi_metric < eth_metric)) {
             selected = wifi_dns;
         } else if ((static_eth_route || dhcp_eth_route) && !eth_dns.empty()) {
             selected = eth_dns;
