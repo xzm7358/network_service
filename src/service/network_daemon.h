@@ -9,6 +9,7 @@
 
 namespace network_service {
 
+class NetworkControlPlane;
 class WifiManager;
 class WpaEventMonitor;
 class WifiScanLifecycle;
@@ -24,6 +25,7 @@ public:
                   SnapshotProvider snapshot_provider = {});
     ~NetworkDaemon();
 
+    bool reconcile(std::string &error);
     NetworkSnapshot snapshot() const;
     std::string snapshot_result_json() const;
     std::string snapshot_json() const;
@@ -51,6 +53,7 @@ private:
     std::string wifi_iface_;
     std::string config_dir_;
     SnapshotProvider snapshot_provider_;
+    std::unique_ptr<NetworkControlPlane> control_plane_;
     std::unique_ptr<WifiManager> wifi_manager_;
     std::unique_ptr<WpaEventMonitor> wpa_monitor_;
     std::unique_ptr<WifiScanLifecycle> wifi_scan_lifecycle_;
