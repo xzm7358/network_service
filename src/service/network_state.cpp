@@ -10,7 +10,6 @@ const char *wifi_l2_state_name(WifiL2State state) {
     switch (state) {
     case WifiL2State::Disabled: return "disabled";
     case WifiL2State::Disconnected: return "disconnected";
-    case WifiL2State::Scanning: return "scanning";
     case WifiL2State::Associating: return "associating";
     case WifiL2State::Associated: return "associated";
     case WifiL2State::Handshake: return "handshake";
@@ -85,8 +84,6 @@ std::string legacy_wifi_state(const NetworkSnapshot &snapshot,
         return "disabled";
     case WifiL2State::Disconnected:
         return "disconnected";
-    case WifiL2State::Scanning:
-        return "scanning";
     case WifiL2State::Associating:
         return "associating";
     case WifiL2State::Associated:
