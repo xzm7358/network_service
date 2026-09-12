@@ -4,9 +4,8 @@
 #include <string>
 #include <vector>
 
-#include "config/ethernet_config.h"
+#include "network_service_contracts.h"
 #include "network_service_types.h"
-#include "platform/wifi_backend.h"
 #include "service/network_operation_result.h"
 #include "service/network_state_change_detector.h"
 #include "service/wifi_scan_lifecycle.h"
