@@ -97,6 +97,16 @@ void WifiManager::stop_dhcp() {
     }
 }
 
+void WifiManager::adopt_dhcp_running() {
+    std::lock_guard<std::mutex> operation_guard(operation_lock_);
+    std::lock_guard<std::mutex> guard(lock_);
+    // Platform has already verified process identity. Do not mark L2 connected:
+    // an existing DHCP client and current supplicant L2 state are independent
+    // facts and the latter is reconciled by the WPA path.
+    state_.dhcp_state = DhcpClientState::Running;
+    state_.failure_reason.clear();
+}
+
 bool WifiManager::reconcile_dhcp_process() {
     {
         std::lock_guard<std::mutex> guard(lock_);
