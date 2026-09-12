@@ -40,7 +40,7 @@ bool NetworkControlPlane::repair_owned_state_locked(std::string &error) {
                            const InterfaceSnapshot &observed,
                            const std::string &ip4,
                            const std::string &netmask4) -> bool {
-        if (ip4.empty() || netmask4.empty()) return true;
+        if (!observed.exists || ip4.empty() || netmask4.empty()) return true;
         if (observed.has_ip && observed.ip4 == ip4 && observed.netmask4 == netmask4) {
             return true;
         }
@@ -55,7 +55,7 @@ bool NetworkControlPlane::repair_owned_state_locked(std::string &error) {
                                     const InterfaceSnapshot &observed,
                                     const std::string &gateway4,
                                     int metric) -> bool {
-        if (!route_allowed(iface) || gateway4.empty()) return true;
+        if (!observed.exists || !route_allowed(iface) || gateway4.empty()) return true;
         if (observed.has_default_route) {
             // Until route ownership identity is introduced, never replace a live
             // route merely because its gateway/metric differs. It may belong to
