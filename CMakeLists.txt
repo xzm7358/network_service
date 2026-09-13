@@ -134,6 +134,11 @@ if(BUILD_TESTING)
             -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/ethernet_runtime_persistence_transaction_guard.cmake)
 
+    add_test(NAME network_service_supervisor
+        COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/network_service_supervisor_test.sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/packaging/S40network_service)
+
     add_executable(network_ipc_v1_codec_test
         tests/network_ipc_v1_codec_test.cpp
     )
