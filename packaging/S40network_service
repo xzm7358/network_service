@@ -162,7 +162,10 @@ start_service() {
     return 0
   fi
 
-  "$0" supervise &
+  # Invoke through /bin/sh rather than relying on executable mode of the init
+  # script itself. This is valid for BusyBox ash and also keeps host regressions
+  # faithful when repository file-mode metadata is unavailable.
+  sh "$0" supervise &
   launched_pid=$!
 
   elapsed=0
