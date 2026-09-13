@@ -21,13 +21,8 @@ const char *route_policy_to_string(RoutePolicy policy) {
     }
 }
 
-const char *dns_policy_to_string(DnsPolicy policy) {
-    switch (policy) {
-    case DnsPolicy::Append: return "append";
-    case DnsPolicy::Disabled: return "disabled";
-    case DnsPolicy::Overwrite:
-    default: return "overwrite";
-    }
+const char *dns_policy_to_string(DnsPolicy) {
+    return "overwrite";
 }
 
 std::string iface_payload(const InterfaceSnapshot &iface) {
@@ -119,6 +114,14 @@ std::string ping_payload(const PingInfo &info) {
     os << "{\"service\":\"" << json_escape(info.service)
        << "\",\"version\":\"" << json_escape(info.version)
        << "\",\"mode\":\"" << json_escape(info.mode) << "\"}";
+    return os.str();
+}
+
+std::string route_policy_payload(const RoutePolicyInfo &info) {
+    std::ostringstream os;
+    os << "{\"policy\":\"" << route_policy_to_string(info.policy)
+       << "\",\"persistent\":" << (info.persistent ? "true" : "false")
+       << "}";
     return os.str();
 }
 
