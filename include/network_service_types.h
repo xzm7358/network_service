@@ -19,10 +19,12 @@ enum class RoutePolicy {
     ManualMetric,
 };
 
+// Current product DNS semantics are intentionally singular: DNS follows the
+// selected primary route and NetworkService overwrites only its owned resolver
+// file. Append/Disabled previously existed as dead enum surface with no policy
+// implementation; keep the wire field but expose only the behavior that exists.
 enum class DnsPolicy {
     Overwrite,
-    Append,
-    Disabled,
 };
 
 enum class WifiL2State {
