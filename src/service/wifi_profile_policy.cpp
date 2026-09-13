@@ -56,7 +56,26 @@ bool WifiProfilePolicy::connect_new(const std::string &ssid,
 
     const int network_id = ops_.create_profile(ssid, password, error);
     if (network_id < 0) return false;
-    return activate_profile(network_id, true, error);
+
+    if (activate_profile(network_id, true, error)) return true;
+
+    // `connect_new` owns the just-created profile until activation succeeds.
+    // Never leave that transient resource behind after ENABLE/SELECT failure.
+    // Preserve the original activation diagnostic even if rollback itself fails.
+    const std::string failure = error;
+    std::string rollback_error;
+    if (ops_.remove_profile) {
+        (void)ops_.remove_profile(network_id, rollback_error);
+        // If removal succeeded, best-effort persistence prevents a failed new
+        // connection from reappearing after supplicant restart. This is cleanup,
+        // not the success path's persistence guarantee.
+        if (rollback_error.empty() && ops_.save_profiles) {
+            std::string ignored;
+            (void)ops_.save_profiles(ignored);
+        }
+    }
+    error = failure;
+    return false;
 }
 
 bool WifiProfilePolicy::connect_saved(const std::string &ssid,
