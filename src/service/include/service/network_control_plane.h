@@ -105,6 +105,11 @@ private:
     OwnedRouteState eth_route_;
     OwnedRouteState wifi_route_;
     RoutePolicy route_policy_ = RoutePolicy::EthernetPreferred;
+
+    // Resolver ownership is process-local policy state, but it can be recovered
+    // once from Platform's raw marker fact after daemon restart. Initialization
+    // is explicit so the changed-aware reactor cannot skip the adoption pass.
+    bool dns_ownership_initialized_ = false;
     bool managed_dns_ = false;
     std::string last_dns_;
 };
