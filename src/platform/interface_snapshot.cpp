@@ -15,6 +15,13 @@ namespace network_service {
 
 namespace {
 
+constexpr const char *kDnsOwnerMarker = "# managed-by-network-service";
+
+struct DnsFileFact {
+    bool managed_by_network_service = false;
+    std::string dns4;
+};
+
 static std::string sockaddr_to_ipv4(const sockaddr *addr) {
     if (!addr || addr->sa_family != AF_INET) return {};
     char buffer[INET_ADDRSTRLEN] = {0};
@@ -121,17 +128,26 @@ static void populate_default_routes(NetworkSnapshot &snapshot) {
 }
 #endif
 
-static std::string read_first_dns() {
+static DnsFileFact read_dns_fact() {
+    DnsFileFact fact;
     std::ifstream f("/etc/resolv.conf");
-    if (!f) return {};
+    if (!f) return fact;
+
     std::string line;
+    bool first_line = true;
     while (std::getline(f, line)) {
+        if (first_line) {
+            fact.managed_by_network_service = line == kDnsOwnerMarker;
+            first_line = false;
+        }
+
+        if (!fact.dns4.empty()) continue;
         std::istringstream iss(line);
         std::string key;
         std::string value;
-        if ((iss >> key >> value) && key == "nameserver") return value;
+        if ((iss >> key >> value) && key == "nameserver") fact.dns4 = value;
     }
-    return {};
+    return fact;
 }
 
 } // namespace
@@ -148,11 +164,15 @@ NetworkSnapshot read_live_snapshot(const char *eth_iface, const char *wifi_iface
     populate_default_routes(snapshot);
 #endif
 
-    snapshot.dns4 = read_first_dns();
+    const DnsFileFact dns = read_dns_fact();
+    snapshot.dns4 = dns.dns4;
     snapshot.dns_available = !snapshot.dns4.empty();
+    snapshot.dns_managed_by_network_service = dns.managed_by_network_service;
 
     // This platform function intentionally returns raw kernel/filesystem facts.
-    // Service/Policy owns connected/ip_state/primary_iface/network_ready/online.
+    // Service/Policy owns connected/ip_state/primary_iface/network_ready/online
+    // and whether a historical resolver marker should be adopted as live Service
+    // ownership.
     return snapshot;
 }
 
