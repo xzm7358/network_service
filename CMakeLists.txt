@@ -129,6 +129,11 @@ if(BUILD_TESTING)
             -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/wifi_platform_profile_rollback_guard.cmake)
 
+    add_test(NAME ethernet_runtime_persistence_transaction_guard
+        COMMAND ${CMAKE_COMMAND}
+            -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/ethernet_runtime_persistence_transaction_guard.cmake)
+
     add_executable(network_ipc_v1_codec_test
         tests/network_ipc_v1_codec_test.cpp
     )
