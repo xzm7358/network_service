@@ -1,8 +1,10 @@
 #include "config/ethernet_config.h"
 
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
 #include <fstream>
 #include <sstream>
@@ -14,6 +16,8 @@
 namespace network_service {
 
 namespace {
+
+std::atomic<unsigned long long> g_stage_sequence{0};
 
 static std::string trim(const std::string &value) {
     size_t begin = 0;
@@ -31,9 +35,15 @@ static std::string trim(const std::string &value) {
     return value.substr(begin, end - begin);
 }
 
-static void ensure_dir(const std::string &dir) {
-    if (dir.empty()) return;
-    (void)mkdir(dir.c_str(), 0755);
+static bool ensure_dir(const std::string &dir, std::string &error) {
+    if (dir.empty()) {
+        error = "ethernet config directory is empty";
+        return false;
+    }
+    if (mkdir(dir.c_str(), 0755) == 0 || errno == EEXIST) return true;
+    error = std::string("failed to create ethernet config directory: ") +
+            std::strerror(errno);
+    return false;
 }
 
 static bool write_all(int fd, const std::string &data) {
@@ -75,12 +85,16 @@ static std::string serialize_ethernet_config(const EthernetConfig &config) {
     return out.str();
 }
 
+static std::string config_directory(const std::string &config_dir) {
+    std::string dir = config_dir.empty() ? "/dnake/data" : config_dir;
+    if (!dir.empty() && dir.back() == '/') dir.pop_back();
+    return dir;
+}
+
 } // namespace
 
 std::string ethernet_config_path(const std::string &config_dir) {
-    std::string dir = config_dir.empty() ? "/dnake/data" : config_dir;
-    if (!dir.empty() && dir.back() == '/') dir.pop_back();
-    return dir + "/smart_hmi_ethernet.conf";
+    return config_directory(config_dir) + "/smart_hmi_ethernet.conf";
 }
 
 EthernetConfig load_ethernet_config(const std::string &config_dir,
@@ -111,36 +125,110 @@ EthernetConfig load_ethernet_config(const std::string &config_dir,
     return config;
 }
 
-bool save_ethernet_config(const std::string &config_dir, const EthernetConfig &config) {
-    std::string dir = config_dir.empty() ? "/dnake/data" : config_dir;
-    if (!dir.empty() && dir.back() == '/') dir.pop_back();
-    ensure_dir(dir);
+bool stage_ethernet_config(const std::string &config_dir,
+                           const EthernetConfig &config,
+                           EthernetConfigStage &stage,
+                           std::string &error) {
+    discard_ethernet_config(stage);
+    error.clear();
+
+    const std::string dir = config_directory(config_dir);
+    if (!ensure_dir(dir, error)) return false;
 
     const std::string path = ethernet_config_path(config_dir);
-    const std::string tmp = path + "." + std::to_string(static_cast<long>(getpid())) + ".tmp";
+    const unsigned long long sequence =
+        g_stage_sequence.fetch_add(1, std::memory_order_relaxed);
+    const std::string tmp = path + "." + std::to_string(static_cast<long>(getpid())) +
+                            "." + std::to_string(sequence) + ".stage";
     const std::string data = serialize_ethernet_config(config);
 
-    const int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) return false;
+    const int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (fd < 0) {
+        error = std::string("failed to create staged ethernet config: ") +
+                std::strerror(errno);
+        return false;
+    }
 
     bool ok = write_all(fd, data);
-    if (ok) ok = fsync(fd) == 0;
-    if (close(fd) != 0) ok = false;
+    if (!ok) {
+        error = std::string("failed to write staged ethernet config: ") +
+                std::strerror(errno);
+    }
+    if (ok && fsync(fd) != 0) {
+        ok = false;
+        error = std::string("failed to fsync staged ethernet config: ") +
+                std::strerror(errno);
+    }
+    if (close(fd) != 0 && ok) {
+        ok = false;
+        error = std::string("failed to close staged ethernet config: ") +
+                std::strerror(errno);
+    }
 
     if (!ok) {
         (void)unlink(tmp.c_str());
         return false;
     }
 
-    if (std::rename(tmp.c_str(), path.c_str()) != 0) {
-        (void)unlink(tmp.c_str());
-        return false;
+    stage.temp_path = tmp;
+    stage.final_path = path;
+    stage.directory = dir;
+    stage.valid = true;
+    return true;
+}
+
+EthernetConfigCommitResult commit_ethernet_config(EthernetConfigStage &stage,
+                                                   std::string &error) {
+    error.clear();
+    if (!stage.valid || stage.temp_path.empty() || stage.final_path.empty() ||
+        stage.directory.empty()) {
+        error = "ethernet config stage is invalid";
+        return EthernetConfigCommitResult::Failed;
     }
 
-    // Persist the directory entry as well as file data. If this fails, the file
-    // is still internally complete, but durability across sudden power loss is
-    // not guaranteed, so report failure to the caller.
-    return fsync_directory(dir);
+    if (std::rename(stage.temp_path.c_str(), stage.final_path.c_str()) != 0) {
+        error = std::string("failed to commit ethernet config: ") +
+                std::strerror(errno);
+        return EthernetConfigCommitResult::Failed;
+    }
+
+    // rename() is the logical commit point. From here the final path contains the
+    // complete new file. Do not pretend it was not committed if only the directory
+    // durability barrier fails; callers must keep runtime aligned with this file.
+    stage.temp_path.clear();
+    stage.valid = false;
+
+    if (!fsync_directory(stage.directory)) {
+        error = std::string("ethernet config committed but directory fsync failed: ") +
+                std::strerror(errno);
+        stage.final_path.clear();
+        stage.directory.clear();
+        return EthernetConfigCommitResult::CommittedDurabilityUncertain;
+    }
+
+    stage.final_path.clear();
+    stage.directory.clear();
+    return EthernetConfigCommitResult::CommittedDurable;
+}
+
+void discard_ethernet_config(EthernetConfigStage &stage) {
+    if (stage.valid && !stage.temp_path.empty()) {
+        (void)unlink(stage.temp_path.c_str());
+    }
+    stage = EthernetConfigStage{};
+}
+
+bool save_ethernet_config(const std::string &config_dir, const EthernetConfig &config) {
+    EthernetConfigStage stage;
+    std::string error;
+    if (!stage_ethernet_config(config_dir, config, stage, error)) return false;
+
+    const EthernetConfigCommitResult result = commit_ethernet_config(stage, error);
+    if (result == EthernetConfigCommitResult::Failed) {
+        discard_ethernet_config(stage);
+        return false;
+    }
+    return result == EthernetConfigCommitResult::CommittedDurable;
 }
 
 } // namespace network_service
