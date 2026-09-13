@@ -321,6 +321,24 @@ bool NetworkControlPlane::recompute_dns_locked(std::string &error) {
         return live;
     };
 
+    // Recover only historical ownership identity here. The marker is a Platform
+    // fact, not a policy decision: the switch below still decides whether this
+    // process should keep, update, or relinquish the resolver under current route
+    // truth. Marker absence means any existing resolver belongs to someone else.
+    if (!dns_ownership_initialized_) {
+        if (ops_.snapshot) {
+            const NetworkSnapshot &current = load_live();
+            if (current.dns_managed_by_network_service) {
+                managed_dns_ = true;
+                last_dns_ = current.dns4;
+            } else {
+                managed_dns_ = false;
+                last_dns_.clear();
+            }
+        }
+        dns_ownership_initialized_ = true;
+    }
+
     switch (route_policy_) {
     case RoutePolicy::WifiPreferred:
         if (wifi_route && !wifi_dns.empty()) selected = wifi_dns;

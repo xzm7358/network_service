@@ -89,6 +89,12 @@ struct NetworkSnapshot {
     std::string primary_iface;
     bool dns_available = false;
 
+    // Raw filesystem ownership fact. Platform sets this only when the resolver
+    // file carries NetworkService's exact ownership marker. Service decides
+    // whether to adopt/relinquish that historical ownership. This field is
+    // internal truth and is deliberately not part of the IPC wire schema.
+    bool dns_managed_by_network_service = false;
+
     // Internal readiness fact: the selected primary interface has usable link,
     // IPv4/default-route truth and DNS configuration. This is not an Internet
     // reachability probe.

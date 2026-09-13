@@ -120,7 +120,11 @@ bool NetworkControlPlane::reconcile(bool &changed, std::string &error) {
     if (!reconcile_link_locked(eth_iface_, eth_, eth_changed, error)) return false;
     if (!reconcile_link_locked(wifi_iface_, wifi_, wifi_changed, error)) return false;
 
-    changed = eth_changed || wifi_changed;
+    // Even with no lease transition, a fresh daemon must perform one DNS pass to
+    // recover/reject resolver ownership from Platform's marker fact. Otherwise
+    // the changed-aware 250 ms reactor could skip Brownfield ownership forever.
+    const bool dns_initialization_needed = !dns_ownership_initialized_;
+    changed = eth_changed || wifi_changed || dns_initialization_needed;
     if (!changed) return true;
     return recompute_dns_locked(error);
 }
