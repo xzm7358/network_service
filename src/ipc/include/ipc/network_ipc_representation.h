@@ -19,6 +19,7 @@ std::string json_escape(const std::string &value);
 std::string snapshot_payload(const NetworkSnapshot &snapshot);
 std::string state_changes_payload(const NetworkStateChangeSet &changes);
 std::string ping_payload(const PingInfo &info);
+std::string route_policy_payload(const RoutePolicyInfo &info);
 std::string wpa_events_payload(const WpaEventsView &view);
 std::string ethernet_config_payload(const EthernetConfig &config);
 std::string wifi_scan_payload(const std::vector<WifiApRecord> &records);

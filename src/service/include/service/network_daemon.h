@@ -43,6 +43,8 @@ public:
 
     NetworkSnapshot snapshot() const;
     PingInfo ping() const;
+    NetworkOperationResult<RoutePolicyInfo> route_policy_get() const;
+    NetworkOperationResult<RoutePolicyInfo> route_policy_apply(RoutePolicy policy);
     NetworkOperationResult<WpaEventsView> wpa_events() const;
     NetworkOperationResult<EthernetConfig> eth_get_config() const;
     NetworkOperationResult<EthernetConfig> eth_set_dhcp() const;

@@ -287,6 +287,23 @@ bool read_bool(std::string_view object, const char *key, bool *out) {
     return false;
 }
 
+bool parse_product_route_policy(const std::string &value, RoutePolicy *out) {
+    if (out == nullptr) return false;
+    if (value == "ethernet_preferred") {
+        *out = RoutePolicy::EthernetPreferred;
+        return true;
+    }
+    if (value == "wifi_preferred") {
+        *out = RoutePolicy::WifiPreferred;
+        return true;
+    }
+    if (value == "wifi_only") {
+        *out = RoutePolicy::WifiOnly;
+        return true;
+    }
+    return false;
+}
+
 std::vector<std::uint8_t> encode_response_payload(const std::string &payload) {
     CodecError error = CodecError::None;
     auto frame = encode_frame(MessageType::Response, payload, error);
@@ -340,6 +357,24 @@ std::vector<std::uint8_t> dispatch_business_request(
     std::uint64_t request_id,
     const std::string &method,
     const std::string &params_json) {
+    if (method == "network.route_policy.get") {
+        return operation_response(request_id,
+                                  daemon.route_policy_get(),
+                                  ipc_representation::route_policy_payload);
+    }
+    if (method == "network.route_policy.apply") {
+        std::string policy_name;
+        RoutePolicy policy = RoutePolicy::EthernetPreferred;
+        if (!read_string(params_json, "policy", &policy_name) ||
+            !parse_product_route_policy(policy_name, &policy)) {
+            return invalid_params(
+                request_id,
+                "network.route_policy.apply requires policy ethernet_preferred, wifi_preferred, or wifi_only");
+        }
+        return operation_response(request_id,
+                                  daemon.route_policy_apply(policy),
+                                  ipc_representation::route_policy_payload);
+    }
     if (method == "eth.get_config") {
         return operation_response(request_id,
                                   daemon.eth_get_config(),
