@@ -194,6 +194,12 @@ if(BUILD_TESTING)
     target_link_libraries(network_control_plane_test PRIVATE NetworkService::Service)
     add_test(NAME network_control_plane COMMAND network_control_plane_test)
 
+    add_executable(dns_brownfield_ownership_test
+        tests/dns_brownfield_ownership_test.cpp
+    )
+    target_link_libraries(dns_brownfield_ownership_test PRIVATE NetworkService::Service)
+    add_test(NAME dns_brownfield_ownership COMMAND dns_brownfield_ownership_test)
+
     add_executable(network_state_test
         tests/network_state_test.cpp
     )
