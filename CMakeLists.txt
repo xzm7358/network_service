@@ -201,6 +201,12 @@ if(BUILD_TESTING)
     target_link_libraries(service_contract_visibility_test PRIVATE NetworkService::Service)
     add_test(NAME service_contract_visibility COMMAND service_contract_visibility_test)
 
+    add_executable(ethernet_config_transaction_test
+        tests/ethernet_config_transaction_test.cpp
+    )
+    target_link_libraries(ethernet_config_transaction_test PRIVATE NetworkService::Platform)
+    add_test(NAME ethernet_config_transaction COMMAND ethernet_config_transaction_test)
+
     add_executable(dhcp_lease_store_test
         tests/dhcp_lease_store_test.cpp
     )
