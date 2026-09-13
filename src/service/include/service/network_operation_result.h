@@ -4,6 +4,8 @@
 #include <string>
 #include <utility>
 
+#include "network_service_types.h"
+
 namespace network_service {
 
 template <typename T>
@@ -33,6 +35,13 @@ struct PingInfo {
     std::string service;
     std::string version;
     std::string mode;
+};
+
+struct RoutePolicyInfo {
+    RoutePolicy policy = RoutePolicy::EthernetPreferred;
+    // The current product runs in explicit-apply mode. Persistence is a separate
+    // durability concern and is intentionally not implied by this API.
+    bool persistent = false;
 };
 
 struct WifiEnabledResult {
