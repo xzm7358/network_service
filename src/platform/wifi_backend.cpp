@@ -245,27 +245,40 @@ int wifi_create_profile(const std::string &iface,
     const int id = wpa_add_network(iface, error);
     if (id < 0) return -1;
 
+    // ADD_NETWORK creates an in-memory supplicant object immediately. Until this
+    // function returns the id to Service, Platform owns that transient resource
+    // and must remove it on every subsequent configuration failure. Preserve the
+    // original error: cleanup is best-effort and must not hide the root cause.
+    auto rollback_new_profile = [&]() {
+        std::string ignored;
+        (void)wpa_ok(iface, "REMOVE_NETWORK " + std::to_string(id), ignored);
+    };
+    auto fail_after_add = [&]() -> int {
+        rollback_new_profile();
+        return -1;
+    };
+
     std::string quoted_ssid;
-    if (!wpa_quote(ssid, quoted_ssid, error)) return -1;
+    if (!wpa_quote(ssid, quoted_ssid, error)) return fail_after_add();
     if (!wpa_ok(iface,
                 "SET_NETWORK " + std::to_string(id) + " ssid " + quoted_ssid,
                 error)) {
-        return -1;
+        return fail_after_add();
     }
 
     if (password.empty()) {
         if (!wpa_ok(iface,
                     "SET_NETWORK " + std::to_string(id) + " key_mgmt NONE",
                     error)) {
-            return -1;
+            return fail_after_add();
         }
     } else {
         std::string quoted_psk;
-        if (!wpa_quote(password, quoted_psk, error)) return -1;
+        if (!wpa_quote(password, quoted_psk, error)) return fail_after_add();
         if (!wpa_ok(iface,
                     "SET_NETWORK " + std::to_string(id) + " psk " + quoted_psk,
                     error)) {
-            return -1;
+            return fail_after_add();
         }
     }
 
