@@ -42,4 +42,42 @@ bool NetworkDaemon::consume_runtime_state_dirty() {
     return current != previous;
 }
 
+NetworkOperationResult<RoutePolicyInfo> NetworkDaemon::route_policy_get() const {
+    if (!control_plane_) {
+        return NetworkOperationResult<RoutePolicyInfo>::failure(
+            500, "network control plane unavailable");
+    }
+    RoutePolicyInfo info;
+    info.policy = control_plane_->route_policy();
+    info.persistent = false;
+    return NetworkOperationResult<RoutePolicyInfo>::success(info);
+}
+
+NetworkOperationResult<RoutePolicyInfo> NetworkDaemon::route_policy_apply(
+    RoutePolicy policy) {
+    if (!control_plane_) {
+        return NetworkOperationResult<RoutePolicyInfo>::failure(
+            500, "network control plane unavailable");
+    }
+
+    // ManualMetric exists as an internal control-plane mode but has no complete
+    // product parameter contract yet (notably no Wi-Fi metric input). Do not let
+    // callers reach a partially specified policy through this Service surface.
+    if (policy == RoutePolicy::ManualMetric) {
+        return NetworkOperationResult<RoutePolicyInfo>::failure(
+            400, "manual_metric is not a supported product route policy");
+    }
+
+    std::string error;
+    if (!control_plane_->set_route_policy(policy, error)) {
+        return NetworkOperationResult<RoutePolicyInfo>::failure(
+            500, error.empty() ? "failed to apply route policy" : std::move(error));
+    }
+
+    RoutePolicyInfo info;
+    info.policy = control_plane_->route_policy();
+    info.persistent = false;
+    return NetworkOperationResult<RoutePolicyInfo>::success(info);
+}
+
 } // namespace network_service
