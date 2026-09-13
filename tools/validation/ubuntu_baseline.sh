@@ -39,7 +39,7 @@ export NS_VAL_WPA_CTRL_DIR="$WPA_CTRL_DIR"
 export NS_VAL_EVIDENCE_DIR="$EVIDENCE_DIR"
 export NS_VAL_PREFLIGHT_REPORT="$EVIDENCE_DIR/preflight.log"
 
-"$PREFLIGHT"
+sh "$PREFLIGHT"
 
 capture_network_state() {
   phase=$1
@@ -164,7 +164,7 @@ export NS_VAL_PID="$DAEMON_PID"
 export NS_VAL_NETWORKCTL="$NETWORKCTL"
 export NS_VAL_DURATION_SECONDS="$DURATION"
 export NS_VAL_INTERVAL_SECONDS="$INTERVAL"
-"$COLLECTOR"
+sh "$COLLECTOR"
 
 python3 "$NETWORKCTL" --socket "$SOCKET_PATH" network.snapshot \
   > "$EVIDENCE_DIR/final-snapshot.json" 2> "$EVIDENCE_DIR/final-snapshot.err" || true
