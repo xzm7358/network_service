@@ -118,6 +118,86 @@ static void adopt_existing_dhcp(const std::string &iface,
     }
 }
 
+static bool apply_ethernet_runtime(NetworkControlPlane &control_plane,
+                                   const std::string &iface,
+                                   const EthernetConfig &config,
+                                   std::string &error) {
+    error.clear();
+    if (config.method == "static") {
+        return control_plane.apply_ethernet_static(config.ip4,
+                                                   config.netmask4,
+                                                   config.gateway4,
+                                                   config.dns_enabled ? config.dns4 : "",
+                                                   config.route_metric,
+                                                   error);
+    }
+    return control_plane.start_dhcp(iface, error);
+}
+
+static std::string failure_with_rollback(const std::string &failure,
+                                         const std::string &rollback_error) {
+    if (rollback_error.empty()) return failure;
+    return failure + "; rollback_failed: " + rollback_error;
+}
+
+static NetworkOperationResult<EthernetConfig> apply_ethernet_transaction(
+    NetworkControlPlane *control_plane,
+    const std::string &config_dir,
+    const std::string &iface,
+    EthernetConfig desired) {
+    if (!control_plane) {
+        return NetworkOperationResult<EthernetConfig>::failure(
+            500, "network control plane unavailable");
+    }
+
+    const EthernetConfig previous = load_ethernet_config(config_dir, iface);
+
+    EthernetConfigStage stage;
+    std::string error;
+    if (!stage_ethernet_config(config_dir, desired, stage, error)) {
+        return NetworkOperationResult<EthernetConfig>::failure(
+            500, "failed to stage ethernet config: " + error);
+    }
+
+    if (!apply_ethernet_runtime(*control_plane, iface, desired, error)) {
+        const std::string failure = error.empty()
+                                        ? "failed to apply ethernet runtime config"
+                                        : error;
+        discard_ethernet_config(stage);
+
+        std::string rollback_error;
+        (void)apply_ethernet_runtime(*control_plane, iface, previous, rollback_error);
+        return NetworkOperationResult<EthernetConfig>::failure(
+            500, failure_with_rollback(failure, rollback_error));
+    }
+
+    const EthernetConfigCommitResult commit_result =
+        commit_ethernet_config(stage, error);
+    if (commit_result == EthernetConfigCommitResult::Failed) {
+        const std::string failure = error.empty()
+                                        ? "failed to commit ethernet config"
+                                        : error;
+        discard_ethernet_config(stage);
+
+        std::string rollback_error;
+        (void)apply_ethernet_runtime(*control_plane, iface, previous, rollback_error);
+        return NetworkOperationResult<EthernetConfig>::failure(
+            500, failure_with_rollback(failure, rollback_error));
+    }
+
+    if (commit_result == EthernetConfigCommitResult::CommittedDurabilityUncertain) {
+        // rename() already made desired config the logical durable truth. Keep
+        // runtime aligned with that committed file; rolling back runtime here
+        // would create the exact split-brain this transaction is intended to
+        // prevent. Surface the durability concern operationally without turning
+        // a logically committed operation into an IPC failure.
+        std::cerr << "network_service: ETHERNET_CONFIG_DURABILITY_UNCERTAIN error="
+                  << error << std::endl;
+    }
+
+    return NetworkOperationResult<EthernetConfig>::success(std::move(desired));
+}
+
 } // namespace
 
 NetworkDaemon::NetworkDaemon(std::string eth_iface,
@@ -353,20 +433,10 @@ NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_set_dhcp() const {
     config.route_metric = 10;
     config.dns_enabled = true;
 
-    if (!save_ethernet_config(config_dir_, config)) {
-        return NetworkOperationResult<EthernetConfig>::failure(
-            500, "failed to save ethernet config");
-    }
-    if (!control_plane_) {
-        return NetworkOperationResult<EthernetConfig>::failure(
-            500, "network control plane unavailable");
-    }
-
-    std::string error;
-    if (!control_plane_->start_dhcp(eth_iface_, error)) {
-        return NetworkOperationResult<EthernetConfig>::failure(500, std::move(error));
-    }
-    return NetworkOperationResult<EthernetConfig>::success(std::move(config));
+    return apply_ethernet_transaction(control_plane_.get(),
+                                      config_dir_,
+                                      eth_iface_,
+                                      std::move(config));
 }
 
 NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_set_static(
@@ -384,25 +454,10 @@ NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_set_static(
     config.route_metric = 10;
     config.dns_enabled = !dns.empty();
 
-    if (!save_ethernet_config(config_dir_, config)) {
-        return NetworkOperationResult<EthernetConfig>::failure(
-            500, "failed to save ethernet config");
-    }
-    if (!control_plane_) {
-        return NetworkOperationResult<EthernetConfig>::failure(
-            500, "network control plane unavailable");
-    }
-
-    std::string error;
-    if (!control_plane_->apply_ethernet_static(config.ip4,
-                                               config.netmask4,
-                                               config.gateway4,
-                                               config.dns4,
-                                               config.route_metric,
-                                               error)) {
-        return NetworkOperationResult<EthernetConfig>::failure(500, std::move(error));
-    }
-    return NetworkOperationResult<EthernetConfig>::success(std::move(config));
+    return apply_ethernet_transaction(control_plane_.get(),
+                                      config_dir_,
+                                      eth_iface_,
+                                      std::move(config));
 }
 
 NetworkOperationResult<std::vector<WifiApRecord>> NetworkDaemon::wifi_scan() const {

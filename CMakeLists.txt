@@ -129,6 +129,11 @@ if(BUILD_TESTING)
             -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/wifi_platform_profile_rollback_guard.cmake)
 
+    add_test(NAME ethernet_runtime_persistence_transaction_guard
+        COMMAND ${CMAKE_COMMAND}
+            -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/ethernet_runtime_persistence_transaction_guard.cmake)
+
     add_executable(network_ipc_v1_codec_test
         tests/network_ipc_v1_codec_test.cpp
     )
@@ -200,6 +205,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(service_contract_visibility_test PRIVATE NetworkService::Service)
     add_test(NAME service_contract_visibility COMMAND service_contract_visibility_test)
+
+    add_executable(ethernet_config_transaction_test
+        tests/ethernet_config_transaction_test.cpp
+    )
+    target_link_libraries(ethernet_config_transaction_test PRIVATE NetworkService::Platform)
+    add_test(NAME ethernet_config_transaction COMMAND ethernet_config_transaction_test)
 
     add_executable(dhcp_lease_store_test
         tests/dhcp_lease_store_test.cpp
