@@ -200,12 +200,19 @@ bool wifi_set_enabled(const std::string &iface, bool enabled, std::string &error
     }
     if (enabled) {
         if (!wifi_ensure_interface_up(iface, error)) return false;
+        // Enabling the interface is the product operation. RECONNECT is a
+        // best-effort mechanism hint and does not imply association success.
         std::string ignored;
         (void)wpa_ok(iface, "RECONNECT", ignored);
         error.clear();
         return true;
     }
-    (void)wifi_disconnect(iface, error);
+
+    // Disabling is ultimately enforced by bringing the interface down. A failed
+    // supplicant DISCONNECT must not prevent the hard-down mechanism, and success
+    // here means interface-disable accepted—not that DISCONNECT itself succeeded.
+    std::string ignored;
+    (void)wifi_disconnect(iface, ignored);
     return run_command("ifconfig " + iface + " down", error);
 }
 
@@ -214,10 +221,11 @@ bool wifi_disconnect(const std::string &iface, std::string &error) {
         error = "invalid wifi iface";
         return false;
     }
-    std::string ignored;
-    (void)wpa_ok(iface, "DISCONNECT", ignored);
-    error.clear();
-    return true;
+
+    // This API represents command acceptance by wpa_supplicant. Do not convert a
+    // timeout, missing ctrl socket, or FAIL reply into success. Actual L2 state is
+    // still confirmed independently by WpaEventMonitor/STATUS.
+    return wpa_ok(iface, "DISCONNECT", error);
 }
 
 int wifi_create_profile(const std::string &iface,
@@ -358,7 +366,8 @@ std::vector<WifiApRecord> wifi_scan(const std::string &iface, std::string &error
 }
 
 std::vector<WifiSavedNetwork> wifi_list_saved(const std::string &iface,
-                                              std::string &error) {
+                                               std::string &error) {
+    error.clear();
     if (!is_safe_iface(iface)) {
         error = "invalid wifi iface";
         return {};
