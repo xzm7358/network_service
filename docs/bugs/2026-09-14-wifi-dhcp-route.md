@@ -3,7 +3,7 @@
 ## 状态
 
 - 发现日期：2026-09-14
-- 状态：DHCP 初始失败仍待板端抓包确认；有线调试链路与默认路由分流已确认
+- 状态：DHCP 初始失败未在当前现场复现；错误默认路由已确认并完成临时规避；Realtek 断开清理错误待单独跟进
 - 当前设备地址：`192.168.68.199`
 - 早期调试地址：`192.168.68.90`
 
@@ -143,6 +143,30 @@ ADB 恢复后实测：
 
 因此，后续定位 DHCP/Wi-Fi 时应通过 `192.168.68.90` 的 telnet 或 ADB 进入设备，同时让互联网默认流量继续走实际可用的 `wlan0`，两者不要混为同一条默认路由。
 
+## 2026-09-14 板端现场复现结论
+
+通过 telnet 9900 完成了以下现场操作：
+
+1. 采集基线：`wpa_state=COMPLETED`、`wlan0=192.168.68.199`、`udhcpc` 正常运行、DNS 为 `192.168.68.1`；
+2. 执行 `networkctl wifi-off`：返回 `{"enabled":false}`，wlan0 地址、默认路由和 DHCP 进程均清除；
+3. 执行 `networkctl wifi-on` 并等待收敛；连续两轮以及后续一轮接口级验证均重新获得 `.199`，`networkctl status` 为 `online=true`；
+4. 在 `any` 接口抓包，3 次重连都观察到完整的 DHCP Discover → Offer → ACK。Offer/ACK 均来自 `192.168.68.1`，并携带 `192.168.68.199`、`255.255.255.0`、网关 `192.168.68.1` 和 DNS `192.168.68.1`；
+5. 在 `eth0` 专用接口抓包时没有观察到 DHCP 报文，排除了 DHCP 报文实际从 wlan0 泄漏到 eth0 的假设。
+
+另做了错误默认路由对照实验：临时加入 `default via 192.168.68.1 dev eth0 metric 10` 后，Wi-Fi 仍能收到 DHCP Offer/ACK 并取得 `.199`，但 `networkctl status` 变为 `primary_iface=eth0`、`online=false`、`dns_available=false`。删除该路由并恢复 `wlan0` 默认路由后，状态恢复为 `primary_iface=wlan0`、`online=true`。因此：
+
+- 错误的 eth0 默认路由是当前“已拿到 Wi-Fi 地址但设备不在线/公网不可达”的确定根因；
+- 它不是本次 DHCP Discover 无 Offer 的直接根因，因为在该路由存在时 DHCP 仍完成了 Offer/ACK；
+- 初始日志中的 `udhcpc: no lease, failing` 在本次现场未复现，当前证据已排除“AP/DHCP 服务持续不发 Offer”，但无法排除当时的瞬时 DHCP 服务异常或驱动偶发丢包。若再次失败，必须在失败窗口保留 `tcpdump -ni any` 抓包，不能只凭 `udhcpc` 文本判断。
+
+Wi-Fi 断开/重连时内核日志还重复出现：
+
+```text
+RTW: ERROR Free disconnecting network of scanned_queue failed due to pwlan == NULL
+```
+
+该 Realtek 驱动清理错误目前未阻止后续认证、四次握手或 DHCP，但可能与扫描/断开时序的偶发问题相关，应作为驱动侧次要问题单独跟进；在没有失败窗口抓包前，不应把它直接认定为 DHCP 失败根因。
+
 ## 复现与取证
 
 设备恢复 ADB 或 USB 调试通道后，按以下顺序采集，避免泄露 Wi-Fi 密码：
@@ -157,8 +181,10 @@ ip addr show wlan0
 ip route
 cat /proc/net/route
 ps | grep '[u]dhcpc'
-tcpdump -ni wlan0 -vv 'udp port 67 or 68'
+tcpdump -ni any -vv 'udp port 67 or 68'
 ```
+
+接口关闭期间不要使用 `tcpdump -ni wlan0` 作为唯一抓包入口；当前镜像会直接返回 `That device is not up`。使用 `any` 可覆盖 wlan0 重新启用前后的 DHCP 阶段，抓包完成后删除临时文件。
 
 判定规则：
 
