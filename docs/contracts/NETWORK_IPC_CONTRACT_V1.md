@@ -321,10 +321,15 @@ Multi-outstanding request concurrency, v0 removal, and real-target resource/HIL 
 ## 11. SmartControl business methods
 
 The current v1 business surface used by SmartControl includes
-`network.snapshot`, `network.events.subscribe`, `wifi.set_enabled`,
-`wifi.scan.start`, `wifi.scan.status`, `wifi.connect`, `wifi.save`,
-`wifi.connect_saved`, `wifi.disconnect`, `wifi.forget`, `wifi.autoconnect`,
-`eth.set_dhcp`, and `eth.set_static`.
+`network.ping`, `network.snapshot`, `network.events.subscribe`,
+`network.route_policy.get`, `network.route_policy.apply`, `eth.get_config`,
+`eth.set_dhcp`, `eth.set_static`, `wifi.set_enabled`, `wifi.scan.start`,
+`wifi.scan.status`, `wifi.connect`, `wifi.save`, `wifi.connect_saved`,
+`wifi.saved_list`, `wifi.disconnect`, `wifi.forget`, and `wifi.autoconnect`.
+
+`network.ping` is handled by the v1 session layer and returns the service name
+and negotiated protocol version; the remaining methods are dispatched through
+the NetworkDaemon business surface.
 
 `wifi.save` stores or updates credentials without selecting the profile. Its
 params are `ssid` (non-empty string), `password` (string), and optional

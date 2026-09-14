@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -26,10 +27,7 @@ using Clock = std::chrono::steady_clock;
 struct Options {
     std::string socket_path = kDefaultSocket;
     std::string command;
-    std::string ssid;
-    std::string psk;
-    bool ssid_provided = false;
-    bool psk_provided = false;
+    std::vector<std::string> command_args;
     int timeout_ms = kDefaultTimeoutMs;
     int poll_ms = kDefaultPollMs;
     int scan_timeout_ms = kDefaultScanTimeoutMs;
@@ -381,17 +379,42 @@ bool positiveInteger(const std::string &text, int *value) {
     return true;
 }
 
+bool supportedCommand(std::string_view command) {
+    return command == "ping" || command == "version" || command == "status" ||
+           command == "subscribe" || command == "scan" || command == "scan-results" ||
+           command == "saved-list" || command == "connect" ||
+           command == "connect-saved" || command == "disconnect" ||
+           command == "eth-status" || command == "policy-state" || command == "route" ||
+           command == "apply-route" || command == "dns" || command == "forget" ||
+           command == "wifi-on" || command == "wifi-off" || command == "autoconnect" ||
+           command == "policy";
+}
+
 void printUsage(const char *argv0, std::ostream &out) {
     out << "Usage: " << argv0
         << " [--socket PATH] [--timeout-ms N] [--poll-ms N] [--scan-timeout-ms N]"
            " COMMAND [ARGS...]\n\n"
            "Commands:\n"
+           "  ping                    Check that the network service is reachable\n"
+           "  version                 Print the v1 protocol version\n"
            "  status                  Print the full network snapshot as JSON\n"
+           "  subscribe               Print network events until interrupted\n"
            "  scan                    Start a Wi-Fi scan and wait for its result\n"
+           "  scan-results            Print the latest Wi-Fi scan result\n"
+           "  saved-list              Print saved Wi-Fi networks\n"
            "  wifi-on                 Enable Wi-Fi\n"
            "  wifi-off                Disable Wi-Fi\n"
            "  connect SSID PSK        Connect to a Wi-Fi network\n"
-           "  subscribe               Print network events until interrupted\n";
+           "  connect-saved SSID      Connect to a saved Wi-Fi network\n"
+           "  disconnect              Disconnect Wi-Fi\n"
+           "  eth-status              Print Ethernet status from the network snapshot\n"
+           "  policy-state            Print the active route policy\n"
+           "  route                   Print route-related network state\n"
+           "  apply-route             Re-apply the current route policy\n"
+           "  dns                     Print DNS-related network state\n"
+           "  forget SSID             Forget a saved Wi-Fi network\n"
+           "  autoconnect SSID on|off Set saved-network autoconnect\n"
+           "  policy POLICY           Set ethernet-preferred, wifi-preferred, or wifi-only\n";
 }
 
 bool parseArgs(int argc, char **argv, Options *options, std::string *error) {
@@ -436,15 +459,8 @@ bool parseArgs(int argc, char **argv, Options *options, std::string *error) {
             return false;
         } else if (options->command.empty()) {
             options->command = arg;
-        } else if (options->command == "connect" && !options->ssid_provided) {
-            options->ssid = arg;
-            options->ssid_provided = true;
-        } else if (options->command == "connect" && !options->psk_provided) {
-            options->psk = arg;
-            options->psk_provided = true;
         } else {
-            *error = "unexpected argument: " + arg;
-            return false;
+            options->command_args.push_back(arg);
         }
     }
 
@@ -452,18 +468,44 @@ bool parseArgs(int argc, char **argv, Options *options, std::string *error) {
         *error = "missing command";
         return false;
     }
-    if (options->command == "connect" && !options->ssid_provided) {
-        *error = "connect requires SSID and PSK";
-        return false;
-    }
-    if (options->command == "connect" && !options->psk_provided) {
-        *error = "connect requires SSID and PSK";
-        return false;
-    }
-    if (options->command != "status" && options->command != "scan" &&
-        options->command != "wifi-on" && options->command != "wifi-off" &&
-        options->command != "connect" && options->command != "subscribe") {
+    if (!supportedCommand(options->command)) {
         *error = "unknown command: " + options->command;
+        return false;
+    }
+
+    const std::size_t argument_count = options->command_args.size();
+    if (options->command == "connect" && argument_count != 2) {
+        *error = "connect requires SSID and PSK";
+        return false;
+    }
+    if ((options->command == "connect-saved" || options->command == "forget") &&
+        argument_count != 1) {
+        *error = options->command + " requires SSID";
+        return false;
+    }
+    if (options->command == "autoconnect" && argument_count != 2) {
+        *error = "autoconnect requires SSID and on|off";
+        return false;
+    }
+    if (options->command == "policy" && argument_count != 1) {
+        *error = "policy requires ethernet-preferred, wifi-preferred, or wifi-only";
+        return false;
+    }
+    if (options->command == "autoconnect" && options->command_args[1] != "on" &&
+        options->command_args[1] != "off") {
+        *error = "autoconnect requires on or off";
+        return false;
+    }
+    if (options->command == "policy" && options->command_args[0] != "ethernet-preferred" &&
+        options->command_args[0] != "wifi-preferred" &&
+        options->command_args[0] != "wifi-only") {
+        *error = "policy requires ethernet-preferred, wifi-preferred, or wifi-only";
+        return false;
+    }
+    if (argument_count != 0 && options->command != "connect" &&
+        options->command != "connect-saved" && options->command != "forget" &&
+        options->command != "autoconnect" && options->command != "policy") {
+        *error = options->command + " does not accept arguments";
         return false;
     }
     return true;
@@ -502,21 +544,166 @@ bool successfulResponse(const std::string &response,
     return true;
 }
 
+int runSimpleCommand(network_service::NetworkServiceClient &client,
+                     const Options &options,
+                     const std::string &method,
+                     const std::string &params,
+                     std::ostream &out,
+                     std::ostream &err) {
+    std::string response;
+    if (!request(client, method, params, options.timeout_ms, &response, err)) return 1;
+    std::string_view result;
+    if (!successfulResponse(response, &result, err)) return 1;
+    out << result << '\n';
+    return 0;
+}
+
+bool fetchSnapshot(network_service::NetworkServiceClient &client,
+                   const Options &options,
+                   std::string *response,
+                   std::string_view *snapshot,
+                   std::ostream &err) {
+    if (response == nullptr || snapshot == nullptr) return false;
+    if (!request(client, "network.snapshot", "{}", options.timeout_ms, response, err)) {
+        return false;
+    }
+    std::string_view result;
+    if (!successfulResponse(*response, &result, err)) return false;
+    if (!jsonMember(result, "snapshot", snapshot)) {
+        (void)fail(err, "networkctl: snapshot missing from network service response");
+        return false;
+    }
+    return true;
+}
+
+int runPing(network_service::NetworkServiceClient &client,
+            const Options &options,
+            std::ostream &out,
+            std::ostream &err) {
+    return runSimpleCommand(client, options, "network.ping", "{}", out, err);
+}
+
+int runVersion(network_service::NetworkServiceClient &client,
+               const Options &options,
+               std::ostream &out,
+               std::ostream &err) {
+    std::string response;
+    if (!request(client, "network.ping", "{}", options.timeout_ms, &response, err)) return 1;
+    std::string_view result;
+    if (!successfulResponse(response, &result, err)) return 1;
+    int protocol_version = 0;
+    if (!jsonInteger(result, "protocolVersion", &protocol_version)) {
+        return fail(err, "networkctl: protocol version missing from ping response");
+    }
+    out << protocol_version << '\n';
+    return 0;
+}
+
 int runStatus(network_service::NetworkServiceClient &client,
               const Options &options,
               std::ostream &out,
               std::ostream &err) {
     std::string response;
-    if (!request(client, "network.snapshot", "{}", options.timeout_ms, &response, err)) {
+    std::string_view snapshot;
+    if (!fetchSnapshot(client, options, &response, &snapshot, err)) return 1;
+    out << snapshot << '\n';
+    return 0;
+}
+
+int runScanResults(network_service::NetworkServiceClient &client,
+                   const Options &options,
+                   std::ostream &out,
+                   std::ostream &err) {
+    std::string response;
+    if (!request(client, "wifi.scan.status", "{}", options.timeout_ms, &response, err)) {
         return 1;
     }
     std::string_view result;
     if (!successfulResponse(response, &result, err)) return 1;
-    std::string_view snapshot;
-    if (!jsonMember(result, "snapshot", &snapshot)) {
-        return fail(err, "networkctl: snapshot missing from network service response");
+
+    std::string state;
+    if (!jsonString(result, "state", &state)) {
+        return fail(err, "networkctl: scan response has no state");
     }
-    out << snapshot << '\n';
+    if (state == "failed") {
+        const std::string message = scanError(result);
+        return fail(err, message.empty() ? "wifi scan failed" : message);
+    }
+    if (state == "scanning") return fail(err, "wifi scan is still in progress");
+    if (state != "ready" && state != "idle") {
+        return fail(err, "networkctl: unknown scan state: " + state);
+    }
+
+    std::string_view results;
+    if (!jsonMember(result, "results", &results)) {
+        return fail(err, "networkctl: scan response has no results");
+    }
+    out << results << '\n';
+    return 0;
+}
+
+int runEthStatus(network_service::NetworkServiceClient &client,
+                 const Options &options,
+                 std::ostream &out,
+                 std::ostream &err) {
+    std::string response;
+    std::string_view snapshot;
+    if (!fetchSnapshot(client, options, &response, &snapshot, err)) return 1;
+    std::string_view ethernet;
+    if (!jsonMember(snapshot, "eth", &ethernet)) {
+        return fail(err, "networkctl: Ethernet status missing from network snapshot");
+    }
+    out << ethernet << '\n';
+    return 0;
+}
+
+int runRoute(network_service::NetworkServiceClient &client,
+             const Options &options,
+             std::ostream &out,
+             std::ostream &err) {
+    std::string response;
+    std::string_view snapshot;
+    if (!fetchSnapshot(client, options, &response, &snapshot, err)) return 1;
+
+    std::string_view route_policy;
+    std::string_view primary_iface;
+    std::string_view online;
+    std::string_view ethernet;
+    std::string_view wifi;
+    if (!jsonMember(snapshot, "route_policy", &route_policy) ||
+        !jsonMember(snapshot, "primary_iface", &primary_iface) ||
+        !jsonMember(snapshot, "online", &online) ||
+        !jsonMember(snapshot, "eth", &ethernet) ||
+        !jsonMember(snapshot, "wifi", &wifi)) {
+        return fail(err, "networkctl: route state is incomplete in network snapshot");
+    }
+    out << "{\"route_policy\":" << route_policy
+        << ",\"primary_iface\":" << primary_iface
+        << ",\"online\":" << online
+        << ",\"eth\":" << ethernet
+        << ",\"wifi\":" << wifi << "}\n";
+    return 0;
+}
+
+int runDns(network_service::NetworkServiceClient &client,
+           const Options &options,
+           std::ostream &out,
+           std::ostream &err) {
+    std::string response;
+    std::string_view snapshot;
+    if (!fetchSnapshot(client, options, &response, &snapshot, err)) return 1;
+
+    std::string_view available;
+    std::string_view dns4;
+    std::string_view policy;
+    if (!jsonMember(snapshot, "dns_available", &available) ||
+        !jsonMember(snapshot, "dns4", &dns4) ||
+        !jsonMember(snapshot, "dns_policy", &policy)) {
+        return fail(err, "networkctl: DNS state is incomplete in network snapshot");
+    }
+    out << "{\"dns_available\":" << available
+        << ",\"dns4\":" << dns4
+        << ",\"dns_policy\":" << policy << "}\n";
     return 0;
 }
 
@@ -575,12 +762,36 @@ int runScan(network_service::NetworkServiceClient &client,
     }
 }
 
+int runApplyRoute(network_service::NetworkServiceClient &client,
+                  const Options &options,
+                  std::ostream &out,
+                  std::ostream &err) {
+    std::string response;
+    if (!request(client, "network.route_policy.get", "{}", options.timeout_ms, &response, err)) {
+        return 1;
+    }
+    std::string_view result;
+    if (!successfulResponse(response, &result, err)) return 1;
+
+    std::string policy;
+    if (!jsonString(result, "policy", &policy) || policy.empty()) {
+        return fail(err, "networkctl: route policy missing from network service response");
+    }
+    const std::string params = "{\"policy\":" + network_service::jsonQuote(policy) + "}";
+    return runSimpleCommand(client, options, "network.route_policy.apply", params, out, err);
+}
+
 int runCommand(network_service::NetworkServiceClient &client,
                const Options &options,
                std::ostream &out,
                std::ostream &err) {
+    if (options.command == "ping") return runPing(client, options, out, err);
+    if (options.command == "version") return runVersion(client, options, out, err);
     if (options.command == "status") return runStatus(client, options, out, err);
     if (options.command == "scan") return runScan(client, options, out, err);
+    if (options.command == "scan-results") {
+        return runScanResults(client, options, out, err);
+    }
 
     if (options.command == "subscribe") {
         std::string response;
@@ -618,26 +829,56 @@ int runCommand(network_service::NetworkServiceClient &client,
         }
     }
 
-    std::string method;
-    std::string params;
-    if (options.command == "wifi-on" || options.command == "wifi-off") {
-        method = "wifi.set_enabled";
-        params = std::string("{\"enabled\":") +
-                 (options.command == "wifi-on" ? "true}" : "false}");
-    } else if (options.command == "connect") {
-        method = "wifi.connect";
-        params = "{\"ssid\":" + network_service::jsonQuote(options.ssid) +
-                 ",\"password\":" + network_service::jsonQuote(options.psk) + "}";
-    } else {
-        return fail(err, "networkctl: command dispatch failed");
+    if (options.command == "saved-list") {
+        return runSimpleCommand(client, options, "wifi.saved_list", "{}", out, err);
     }
+    if (options.command == "connect-saved") {
+        const std::string params =
+            "{\"ssid\":" + network_service::jsonQuote(options.command_args[0]) + "}";
+        return runSimpleCommand(client, options, "wifi.connect_saved", params, out, err);
+    }
+    if (options.command == "disconnect") {
+        return runSimpleCommand(client, options, "wifi.disconnect", "{}", out, err);
+    }
+    if (options.command == "eth-status") return runEthStatus(client, options, out, err);
+    if (options.command == "policy-state") {
+        return runSimpleCommand(client, options, "network.route_policy.get", "{}", out, err);
+    }
+    if (options.command == "route") return runRoute(client, options, out, err);
+    if (options.command == "apply-route") return runApplyRoute(client, options, out, err);
+    if (options.command == "dns") return runDns(client, options, out, err);
 
-    std::string response;
-    if (!request(client, method, params, options.timeout_ms, &response, err)) return 1;
-    std::string_view result;
-    if (!successfulResponse(response, &result, err)) return 1;
-    out << result << '\n';
-    return 0;
+    if (options.command == "forget") {
+        const std::string params =
+            "{\"ssid\":" + network_service::jsonQuote(options.command_args[0]) + "}";
+        return runSimpleCommand(client, options, "wifi.forget", params, out, err);
+    }
+    if (options.command == "wifi-on" || options.command == "wifi-off") {
+        const std::string params = std::string("{\"enabled\":") +
+                                   (options.command == "wifi-on" ? "true}" : "false}");
+        return runSimpleCommand(client, options, "wifi.set_enabled", params, out, err);
+    }
+    if (options.command == "connect") {
+        const std::string params =
+            "{\"ssid\":" + network_service::jsonQuote(options.command_args[0]) +
+            ",\"password\":" + network_service::jsonQuote(options.command_args[1]) + "}";
+        return runSimpleCommand(client, options, "wifi.connect", params, out, err);
+    }
+    if (options.command == "autoconnect") {
+        const bool enabled = options.command_args[1] == "on";
+        const std::string params =
+            "{\"ssid\":" + network_service::jsonQuote(options.command_args[0]) +
+            ",\"enabled\":" + (enabled ? "true}" : "false}");
+        return runSimpleCommand(client, options, "wifi.autoconnect", params, out, err);
+    }
+    if (options.command == "policy") {
+        std::string policy = options.command_args[0];
+        std::replace(policy.begin(), policy.end(), '-', '_');
+        const std::string params =
+            "{\"policy\":" + network_service::jsonQuote(policy) + "}";
+        return runSimpleCommand(client, options, "network.route_policy.apply", params, out, err);
+    }
+    return fail(err, "networkctl: command dispatch failed");
 }
 
 int networkctlMain(int argc, char **argv) {

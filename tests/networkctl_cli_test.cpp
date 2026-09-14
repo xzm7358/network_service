@@ -19,12 +19,26 @@ using network_service::ipc_v1::Frame;
 using network_service::ipc_v1::MessageType;
 
 enum class Scenario {
+    Ping,
+    Version,
     Status,
     ScanSuccess,
     ScanFailure,
+    ScanResults,
+    SavedList,
     WifiOn,
     WifiOff,
     Connect,
+    ConnectSaved,
+    Disconnect,
+    EthStatus,
+    PolicyState,
+    Route,
+    Dns,
+    Forget,
+    Autoconnect,
+    Policy,
+    ApplyRoute,
     Subscribe,
 };
 
@@ -86,7 +100,12 @@ void serveScenario(int listener, Scenario scenario) {
 
     const Frame request = receiveFrame(fd);
     assert(request.header.type == MessageType::Request);
-    if (scenario == Scenario::Status) {
+    if (scenario == Scenario::Ping || scenario == Scenario::Version) {
+        assert(request.payload.find("\"method\":\"network.ping\"") !=
+               std::string::npos);
+        sendResponse(fd,
+                     R"({"service":"network_service","protocolVersion":1})");
+    } else if (scenario == Scenario::Status) {
         assert(request.payload.find("\"method\":\"network.snapshot\"") !=
                std::string::npos);
         sendResponse(fd,
@@ -113,6 +132,16 @@ void serveScenario(int listener, Scenario scenario) {
         sendResponse(fd,
                      R"({"scanId":2,"state":"failed","error":"wpa_ctrl connect failed","results":{"count":0,"aps":[]}})",
                      2);
+    } else if (scenario == Scenario::ScanResults) {
+        assert(request.payload.find("\"method\":\"wifi.scan.status\"") !=
+               std::string::npos);
+        sendResponse(fd,
+                     R"({"scanId":3,"state":"ready","error":"","results":{"count":1,"aps":[{"ssid":"Lab"}]}})");
+    } else if (scenario == Scenario::SavedList) {
+        assert(request.payload.find("\"method\":\"wifi.saved_list\"") !=
+               std::string::npos);
+        sendResponse(fd,
+                     R"({"count":1,"saved":[{"ssid":"Lab","network_id":3}]})");
     } else if (scenario == Scenario::WifiOn || scenario == Scenario::WifiOff) {
         assert(request.payload.find("\"method\":\"wifi.set_enabled\"") !=
                std::string::npos);
@@ -130,6 +159,60 @@ void serveScenario(int listener, Scenario scenario) {
         assert(request.payload.find("\"password\":\"p\\\\ss\"") !=
                std::string::npos);
         sendResponse(fd, R"({"requested":"connect"})");
+    } else if (scenario == Scenario::ConnectSaved) {
+        assert(request.payload.find("\"method\":\"wifi.connect_saved\"") !=
+               std::string::npos);
+        assert(request.payload.find("\"ssid\":\"Lab\"") != std::string::npos);
+        sendResponse(fd, R"({"requested":"connect_saved"})");
+    } else if (scenario == Scenario::Disconnect) {
+        assert(request.payload.find("\"method\":\"wifi.disconnect\"") !=
+               std::string::npos);
+        sendResponse(fd, R"({"requested":"disconnect"})");
+    } else if (scenario == Scenario::EthStatus) {
+        assert(request.payload.find("\"method\":\"network.snapshot\"") !=
+               std::string::npos);
+        sendResponse(fd,
+                     R"({"generation":7,"snapshotSeq":0,"snapshot":{"online":false,"eth":{"iface":"eth0","has_ip":true,"ip4":"192.0.2.10"}}})");
+    } else if (scenario == Scenario::PolicyState) {
+        assert(request.payload.find("\"method\":\"network.route_policy.get\"") !=
+               std::string::npos);
+        sendResponse(fd, R"({"policy":"ethernet_preferred","persistent":false})");
+    } else if (scenario == Scenario::Route) {
+        assert(request.payload.find("\"method\":\"network.snapshot\"") !=
+               std::string::npos);
+        sendResponse(fd,
+                     R"({"generation":7,"snapshotSeq":0,"snapshot":{"online":true,"primary_iface":"wlan0","route_policy":"wifi_preferred","eth":{"iface":"eth0"},"wifi":{"iface":"wlan0"}}})");
+    } else if (scenario == Scenario::Dns) {
+        assert(request.payload.find("\"method\":\"network.snapshot\"") !=
+               std::string::npos);
+        sendResponse(fd,
+                     R"({"generation":7,"snapshotSeq":0,"snapshot":{"online":true,"dns_available":true,"dns4":"1.1.1.1","dns_policy":"overwrite"}})");
+    } else if (scenario == Scenario::Forget) {
+        assert(request.payload.find("\"method\":\"wifi.forget\"") !=
+               std::string::npos);
+        assert(request.payload.find("\"ssid\":\"Lab\"") != std::string::npos);
+        sendResponse(fd, R"({"requested":"forget"})");
+    } else if (scenario == Scenario::Autoconnect) {
+        assert(request.payload.find("\"method\":\"wifi.autoconnect\"") !=
+               std::string::npos);
+        assert(request.payload.find("\"ssid\":\"Lab\"") != std::string::npos);
+        assert(request.payload.find("\"enabled\":true") != std::string::npos);
+        sendResponse(fd, R"({"requested":"autoconnect","enabled":true})");
+    } else if (scenario == Scenario::Policy) {
+        assert(request.payload.find("\"method\":\"network.route_policy.apply\"") !=
+               std::string::npos);
+        assert(request.payload.find("\"policy\":\"wifi_only\"") != std::string::npos);
+        sendResponse(fd, R"({"policy":"wifi_only","persistent":false})");
+    } else if (scenario == Scenario::ApplyRoute) {
+        assert(request.payload.find("\"method\":\"network.route_policy.get\"") !=
+               std::string::npos);
+        sendResponse(fd, R"({"policy":"wifi_preferred","persistent":false})");
+        const Frame apply_request = receiveFrame(fd);
+        assert(apply_request.payload.find(
+                   "\"method\":\"network.route_policy.apply\"") != std::string::npos);
+        assert(apply_request.payload.find("\"policy\":\"wifi_preferred\"") !=
+               std::string::npos);
+        sendResponse(fd, R"({"policy":"wifi_preferred","persistent":false})", 2);
     } else {
         assert(scenario == Scenario::Subscribe);
         assert(request.payload.find("\"method\":\"network.events.subscribe\"") !=
@@ -255,12 +338,20 @@ int main(int argc, char **argv) {
     assert(::bind(listener, reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0);
     assert(::listen(listener, 8) == 0);
 
+    runScenario(listener, Scenario::Ping, binary, socket_path, {"ping"}, 0,
+                R"({"service":"network_service","protocolVersion":1})", "");
+    runScenario(listener, Scenario::Version, binary, socket_path, {"version"}, 0,
+                "1", "");
     runScenario(listener, Scenario::Status, binary, socket_path, {"status"}, 0,
                 R"({"online":true,"wifi":{"ssid":"Lab"}})", "");
     runScenario(listener, Scenario::ScanSuccess, binary, socket_path, {"scan"}, 0,
                 R"({"count":1,"aps":[{"ssid":"Lab"}]})", "");
     runScenario(listener, Scenario::ScanFailure, binary, socket_path, {"scan"}, 1, "",
                 "wpa_ctrl connect failed");
+    runScenario(listener, Scenario::ScanResults, binary, socket_path, {"scan-results"}, 0,
+                R"({"count":1,"aps":[{"ssid":"Lab"}]})", "");
+    runScenario(listener, Scenario::SavedList, binary, socket_path, {"saved-list"}, 0,
+                R"({"count":1,"saved":[{"ssid":"Lab","network_id":3}]})", "");
     runScenario(listener, Scenario::WifiOn, binary, socket_path, {"wifi-on"}, 0,
                 R"({"enabled":true})", "");
     runScenario(listener, Scenario::WifiOff, binary, socket_path, {"wifi-off"}, 0,
@@ -268,6 +359,29 @@ int main(int argc, char **argv) {
     runScenario(listener, Scenario::Connect, binary, socket_path,
                 {"connect", "Lab \"WiFi\"", "p\\ss"}, 0,
                 R"({"requested":"connect"})", "");
+    runScenario(listener, Scenario::ConnectSaved, binary, socket_path,
+                {"connect-saved", "Lab"}, 0,
+                R"({"requested":"connect_saved"})", "");
+    runScenario(listener, Scenario::Disconnect, binary, socket_path, {"disconnect"}, 0,
+                R"({"requested":"disconnect"})", "");
+    runScenario(listener, Scenario::EthStatus, binary, socket_path, {"eth-status"}, 0,
+                R"({"iface":"eth0","has_ip":true,"ip4":"192.0.2.10"})", "");
+    runScenario(listener, Scenario::PolicyState, binary, socket_path, {"policy-state"}, 0,
+                R"({"policy":"ethernet_preferred","persistent":false})", "");
+    runScenario(listener, Scenario::Route, binary, socket_path, {"route"}, 0,
+                R"({"route_policy":"wifi_preferred","primary_iface":"wlan0","online":true,"eth":{"iface":"eth0"},"wifi":{"iface":"wlan0"}})", "");
+    runScenario(listener, Scenario::Dns, binary, socket_path, {"dns"}, 0,
+                R"({"dns_available":true,"dns4":"1.1.1.1","dns_policy":"overwrite"})", "");
+    runScenario(listener, Scenario::Forget, binary, socket_path, {"forget", "Lab"}, 0,
+                R"({"requested":"forget"})", "");
+    runScenario(listener, Scenario::Autoconnect, binary, socket_path,
+                {"autoconnect", "Lab", "on"}, 0,
+                R"({"requested":"autoconnect","enabled":true})", "");
+    runScenario(listener, Scenario::Policy, binary, socket_path,
+                {"policy", "wifi-only"}, 0,
+                R"({"policy":"wifi_only","persistent":false})", "");
+    runScenario(listener, Scenario::ApplyRoute, binary, socket_path, {"apply-route"}, 0,
+                R"({"policy":"wifi_preferred","persistent":false})", "");
     runScenario(listener, Scenario::Subscribe, binary, socket_path, {"subscribe"}, 1,
                 R"({"event":"network.state.changed","generation":7,"seq":1,"payload":{"changed":["wifi"]}})",
                 "network service closed the IPC session");

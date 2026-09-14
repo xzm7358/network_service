@@ -99,6 +99,18 @@ def test_read_dispatch_and_persistent_session(path: Path):
             raise AssertionError(f"absent params must default to object: {second}")
 
 
+def test_network_ping(path: Path):
+    with connect_ready(path) as sock:
+        response = request(sock, 23, "network.ping", {})
+        if response.get("status") != 200:
+            raise AssertionError(f"network.ping failed: {response}")
+        result = response.get("result") or {}
+        if result.get("service") != "network_service":
+            raise AssertionError(f"network.ping service mismatch: {response}")
+        if result.get("protocolVersion") != 1:
+            raise AssertionError(f"network.ping protocol version mismatch: {response}")
+
+
 def test_write_method_schema_rejected_without_session_teardown(path: Path):
     with connect_ready(path) as sock:
         bad = request(sock, 31, "wifi.connect", {"ssid": "Lab WiFi"})
@@ -180,6 +192,7 @@ def main():
 
     tests = [
         test_read_dispatch_and_persistent_session,
+        test_network_ping,
         test_write_method_schema_rejected_without_session_teardown,
         test_boolean_schema_is_strict,
         test_save_schema_is_strict,

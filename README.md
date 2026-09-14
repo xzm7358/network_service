@@ -57,18 +57,39 @@ The `networkctl` target is a native C++ debug client linked directly against
 JSON or other runtime dependency outside the NetworkService client library.
 
 ```text
+networkctl [--socket PATH] ping
+networkctl [--socket PATH] version
 networkctl [--socket PATH] status
+networkctl [--socket PATH] subscribe
 networkctl [--socket PATH] scan
+networkctl [--socket PATH] scan-results
+networkctl [--socket PATH] saved-list
 networkctl [--socket PATH] wifi-on
 networkctl [--socket PATH] wifi-off
 networkctl [--socket PATH] connect <ssid> <psk>
-networkctl [--socket PATH] subscribe
+networkctl [--socket PATH] connect-saved <ssid>
+networkctl [--socket PATH] disconnect
+networkctl [--socket PATH] eth-status
+networkctl [--socket PATH] policy-state
+networkctl [--socket PATH] route
+networkctl [--socket PATH] apply-route
+networkctl [--socket PATH] dns
+networkctl [--socket PATH] forget <ssid>
+networkctl [--socket PATH] autoconnect <ssid> <on|off>
+networkctl [--socket PATH] policy <ethernet-preferred|wifi-preferred|wifi-only>
 ```
 
-`status` prints the authoritative snapshot JSON. `scan` starts a scan and
-polls its v1 lifecycle until results are ready; service-side failures are
-printed unchanged so diagnostics such as `wpa_ctrl connect failed` remain
-visible. `subscribe` prints one raw JSON event per line until interrupted.
+`ping` and `version` use the v1 service health/protocol-version method.
+`status` prints the authoritative snapshot JSON. `scan` starts a scan and polls its v1
+lifecycle until results are ready; service-side failures are printed unchanged
+so diagnostics such as `wpa_ctrl connect failed` remain visible.
+`scan-results` reads the current scan lifecycle without starting a new scan.
+`eth-status`, `route`, and `dns` print focused projections of the authoritative
+snapshot. `apply-route` reads and re-applies the current route policy.
+`subscribe` prints one raw JSON event per line until interrupted.
+The backend currently exposes no public v1 operations for `renew-dhcp`,
+`eth-refresh`, or `evaluate-policy`, so those commands are intentionally not
+advertised by this CLI.
 
 ## EEP Brownfield Adoption
 
