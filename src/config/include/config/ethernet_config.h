@@ -22,6 +22,10 @@ enum class EthernetConfigCommitResult {
 
 std::string ethernet_config_path(const std::string &config_dir);
 EthernetConfig load_ethernet_config(const std::string &config_dir, const std::string &iface);
+bool load_ethernet_config(const std::string &config_dir,
+                          const std::string &iface,
+                          EthernetConfig &config,
+                          std::string &error);
 
 // Two-phase durable configuration primitive. Staging writes and fsyncs the full
 // new file without changing the committed path. Commit's rename is the logical

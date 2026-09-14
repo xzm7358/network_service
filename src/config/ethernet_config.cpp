@@ -1,8 +1,10 @@
 #include "config/ethernet_config.h"
 
+#include <arpa/inet.h>
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
@@ -72,57 +74,261 @@ static bool fsync_directory(const std::string &dir) {
     return ok;
 }
 
+static std::string json_escape(const std::string &value) {
+    std::string out;
+    out.reserve(value.size());
+    for (char ch : value) {
+        if (ch == '"' || ch == '\\') out.push_back('\\');
+        out.push_back(ch);
+    }
+    return out;
+}
+
+static int netmask_to_prefix(const std::string &netmask) {
+    in_addr address{};
+    if (inet_pton(AF_INET, netmask.c_str(), &address) != 1) return -1;
+    std::uint32_t bits = ntohl(address.s_addr);
+    int prefix = 0;
+    bool saw_zero = false;
+    for (int bit = 31; bit >= 0; --bit) {
+        const bool set = (bits & (std::uint32_t{1} << bit)) != 0;
+        if (set && saw_zero) return -1;
+        if (set) ++prefix;
+        else saw_zero = true;
+    }
+    return prefix;
+}
+
+static bool is_ipv4(const std::string &value) {
+    in_addr address{};
+    return !value.empty() && inet_pton(AF_INET, value.c_str(), &address) == 1;
+}
+
+static std::string prefix_to_netmask(int prefix) {
+    if (prefix < 0 || prefix > 32) return {};
+    const std::uint32_t bits = prefix == 0 ? 0 : 0xffffffffU << (32 - prefix);
+    in_addr address{};
+    address.s_addr = htonl(bits);
+    char buffer[INET_ADDRSTRLEN] = {0};
+    if (!inet_ntop(AF_INET, &address, buffer, sizeof(buffer))) return {};
+    return buffer;
+}
+
 static std::string serialize_ethernet_config(const EthernetConfig &config) {
     std::ostringstream out;
-    out << "iface=" << config.iface << "\n";
-    out << "method=" << config.method << "\n";
-    out << "ip4=" << config.ip4 << "\n";
-    out << "netmask4=" << config.netmask4 << "\n";
-    out << "gateway4=" << config.gateway4 << "\n";
-    out << "dns4=" << config.dns4 << "\n";
-    out << "route_metric=" << config.route_metric << "\n";
-    out << "dns_enabled=" << (config.dns_enabled ? 1 : 0) << "\n";
+    if (config.method != "static") {
+        out << "{\"mode\":\"dhcp\"}\n";
+        return out.str();
+    }
+
+    const int prefix = netmask_to_prefix(config.netmask4);
+    out << "{\"mode\":\"static\","
+        << "\"address\":\"" << json_escape(config.ip4) << "\","
+        << "\"prefix\":" << prefix << ','
+        << "\"gateway\":\"" << json_escape(config.gateway4) << "\","
+        << "\"dns\":[";
+    if (config.dns_enabled && !config.dns4.empty()) {
+        out << '"' << json_escape(config.dns4) << '"';
+    }
+    out << "]}\n";
     return out.str();
 }
 
 static std::string config_directory(const std::string &config_dir) {
-    std::string dir = config_dir.empty() ? "/dnake/data" : config_dir;
+    std::string dir = config_dir.empty() ? "/data" : config_dir;
     if (!dir.empty() && dir.back() == '/') dir.pop_back();
     return dir;
 }
 
-} // namespace
+static std::string authority_directory(const std::string &config_dir) {
+    return config_directory(config_dir) + "/network-service";
+}
 
-std::string ethernet_config_path(const std::string &config_dir) {
+static std::string legacy_config_path(const std::string &config_dir) {
     return config_directory(config_dir) + "/smart_hmi_ethernet.conf";
 }
 
-EthernetConfig load_ethernet_config(const std::string &config_dir,
-                                    const std::string &iface) {
-    EthernetConfig config;
+static bool extract_json_string(const std::string &json,
+                                const std::string &key,
+                                std::string &value) {
+    const std::string needle = "\"" + key + "\"";
+    std::size_t pos = json.find(needle);
+    if (pos == std::string::npos) return false;
+    pos = json.find(':', pos + needle.size());
+    if (pos == std::string::npos) return false;
+    pos = json.find('"', pos + 1);
+    if (pos == std::string::npos) return false;
+    ++pos;
+
+    value.clear();
+    bool escaped = false;
+    for (; pos < json.size(); ++pos) {
+        const char ch = json[pos];
+        if (escaped) {
+            value.push_back(ch);
+            escaped = false;
+        } else if (ch == '\\') {
+            escaped = true;
+        } else if (ch == '"') {
+            return true;
+        } else {
+            value.push_back(ch);
+        }
+    }
+    return false;
+}
+
+static bool extract_json_int(const std::string &json,
+                             const std::string &key,
+                             int &value) {
+    const std::string needle = "\"" + key + "\"";
+    std::size_t pos = json.find(needle);
+    if (pos == std::string::npos) return false;
+    pos = json.find(':', pos + needle.size());
+    if (pos == std::string::npos) return false;
+    ++pos;
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
+    char *end = nullptr;
+    const long parsed = std::strtol(json.c_str() + pos, &end, 10);
+    if (end == json.c_str() + pos || parsed < 0 || parsed > 32) return false;
+    value = static_cast<int>(parsed);
+    return true;
+}
+
+static bool extract_first_dns(const std::string &json, std::string &dns) {
+    const std::string needle = "\"dns\"";
+    std::size_t pos = json.find(needle);
+    if (pos == std::string::npos) return false;
+    pos = json.find('[', pos + needle.size());
+    if (pos == std::string::npos) return false;
+    const std::size_t end = json.find(']', pos + 1);
+    if (end == std::string::npos) return false;
+    const std::size_t quote = json.find('"', pos + 1);
+    if (quote == std::string::npos || quote > end) {
+        dns.clear();
+        return true;
+    }
+    const std::string array = json.substr(quote, end - quote + 1);
+    return extract_json_string("{\"dns\":" + array + "}", "dns", dns);
+}
+
+static bool parse_json_config(const std::string &json,
+                              const std::string &iface,
+                              EthernetConfig &config) {
+    std::string mode;
+    if (!extract_json_string(json, "mode", mode)) return false;
+
+    config = EthernetConfig{};
     config.iface = iface.empty() ? "eth0" : iface;
+    config.route_metric = 10;
+    if (mode == "dhcp") {
+        config.method = "dhcp";
+        config.dns_enabled = true;
+        return true;
+    }
+    if (mode != "static") return false;
 
-    std::ifstream f(ethernet_config_path(config_dir));
-    if (!f) return config;
+    int prefix = -1;
+    std::string dns;
+    if (!extract_json_string(json, "address", config.ip4) ||
+        !extract_json_int(json, "prefix", prefix) ||
+        !extract_json_string(json, "gateway", config.gateway4) ||
+        !extract_first_dns(json, dns)) {
+        return false;
+    }
+    config.netmask4 = prefix_to_netmask(prefix);
+    if (!is_ipv4(config.ip4) || config.netmask4.empty() ||
+        !is_ipv4(config.gateway4) || (!dns.empty() && !is_ipv4(dns))) {
+        return false;
+    }
+    config.method = "static";
+    config.dns4 = dns;
+    config.dns_enabled = !dns.empty();
+    return true;
+}
 
+static bool load_json_config(const std::string &path,
+                             const std::string &iface,
+                             EthernetConfig &config) {
+    std::ifstream input(path);
+    if (!input) return false;
+    std::ostringstream content;
+    content << input.rdbuf();
+    return parse_json_config(content.str(), iface, config);
+}
+
+static bool load_legacy_config(const std::string &path,
+                               const std::string &iface,
+                               EthernetConfig &config) {
+    std::ifstream input(path);
+    if (!input) return false;
+
+    config = EthernetConfig{};
+    config.iface = iface.empty() ? "eth0" : iface;
     std::string line;
-    while (std::getline(f, line)) {
-        size_t eq = line.find('=');
+    while (std::getline(input, line)) {
+        const size_t eq = line.find('=');
         if (eq == std::string::npos) continue;
-        std::string key = trim(line.substr(0, eq));
-        std::string value = trim(line.substr(eq + 1));
+        const std::string key = trim(line.substr(0, eq));
+        const std::string value = trim(line.substr(eq + 1));
         if (key == "iface") config.iface = value;
         else if (key == "method") config.method = value;
         else if (key == "ip4") config.ip4 = value;
         else if (key == "netmask4") config.netmask4 = value;
         else if (key == "gateway4") config.gateway4 = value;
         else if (key == "dns4") config.dns4 = value;
-        else if (key == "route_metric") config.route_metric = atoi(value.c_str());
+        else if (key == "route_metric") config.route_metric = std::atoi(value.c_str());
         else if (key == "dns_enabled") config.dns_enabled = value != "0";
     }
     if (config.iface.empty()) config.iface = iface.empty() ? "eth0" : iface;
     if (config.method != "static") config.method = "dhcp";
+    return true;
+}
+
+} // namespace
+
+std::string ethernet_config_path(const std::string &config_dir) {
+    return authority_directory(config_dir) + "/ethernet.json";
+}
+
+EthernetConfig load_ethernet_config(const std::string &config_dir,
+                                    const std::string &iface) {
+    EthernetConfig config;
+    std::string ignored;
+    (void)load_ethernet_config(config_dir, iface, config, ignored);
     return config;
+}
+
+bool load_ethernet_config(const std::string &config_dir,
+                          const std::string &iface,
+                          EthernetConfig &config,
+                          std::string &error) {
+    error.clear();
+    config = EthernetConfig{};
+    config.iface = iface.empty() ? "eth0" : iface;
+    const std::string requested_iface = config.iface;
+
+    const std::string authoritative = ethernet_config_path(config_dir);
+    std::ifstream probe(authoritative);
+    if (probe.good()) {
+        probe.close();
+        if (load_json_config(authoritative, requested_iface, config)) return true;
+        config = EthernetConfig{};
+        config.iface = requested_iface;
+        error = "invalid Ethernet configuration: " + authoritative;
+        return false;
+    }
+
+    EthernetConfig legacy;
+    if (load_legacy_config(legacy_config_path(config_dir), requested_iface, legacy)) {
+        if (!save_ethernet_config(config_dir, legacy)) {
+            error = "failed to migrate legacy Ethernet configuration";
+            return false;
+        }
+        config = legacy;
+        return true;
+    }
+    return true;
 }
 
 bool stage_ethernet_config(const std::string &config_dir,
@@ -132,8 +338,21 @@ bool stage_ethernet_config(const std::string &config_dir,
     discard_ethernet_config(stage);
     error.clear();
 
-    const std::string dir = config_directory(config_dir);
-    if (!ensure_dir(dir, error)) return false;
+    if (config.method != "dhcp" && config.method != "static") {
+        error = "Ethernet mode must be dhcp or static";
+        return false;
+    }
+    if (config.method == "static" &&
+        (!is_ipv4(config.ip4) || netmask_to_prefix(config.netmask4) < 0 ||
+         !is_ipv4(config.gateway4) ||
+         (config.dns_enabled && !config.dns4.empty() && !is_ipv4(config.dns4)))) {
+        error = "invalid static Ethernet configuration";
+        return false;
+    }
+
+    const std::string root = config_directory(config_dir);
+    const std::string dir = authority_directory(config_dir);
+    if (!ensure_dir(root, error) || !ensure_dir(dir, error)) return false;
 
     const std::string path = ethernet_config_path(config_dir);
     const unsigned long long sequence =
