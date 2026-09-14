@@ -23,7 +23,9 @@ Default socket:
 /tmp/smart_hmi_network.sock
 ```
 
-The **current production source contract is v0**, using one newline-delimited JSON request and one JSON-line response per accepted connection. It is frozen at:
+The frozen production source contract v0 uses one newline-delimited JSON request
+and one JSON-line response per accepted connection. It remains available as a
+bounded compatibility path at:
 
 - `docs/contracts/network-ipc-source-v0.json`
 - `docs/contracts/NETWORK_IPC_SOURCE_CONTRACT_V0.md`
@@ -38,9 +40,15 @@ Examples:
 {"method":"network.snapshot"}
 ```
 
-The platform Network IPC v1 contract is intentionally **not** claimed as implemented yet. The governed migration is documented in:
+New clients use the implemented persistent Network IPC v1 contract: `NSP1`
+framing, HELLO/READY negotiation, correlated requests, bounded event delivery,
+and snapshot rebase. The contract and migration history are documented in:
 
-`docs/migrations/NETWORK_IPC_V1_MIGRATION_PLAN.md`.
+- `docs/contracts/NETWORK_IPC_CONTRACT_V1.md`
+- `docs/migrations/NETWORK_IPC_V1_MIGRATION_PLAN.md`
+
+The C++ client is exposed as the CMake target `NetworkService::Client` through
+`network_service/v1_client.h`.
 
 ## EEP Brownfield Adoption
 

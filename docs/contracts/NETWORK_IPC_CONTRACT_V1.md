@@ -317,3 +317,15 @@ The executable contract currently freezes these invariants:
 19. dynamic EVENT `seq` and authoritative `network.snapshot.snapshotSeq` remain aligned after rebase.
 
 Multi-outstanding request concurrency, v0 removal, and real-target resource/HIL evidence remain subsequent work.
+
+## 11. SmartControl business methods
+
+The current v1 business surface used by SmartControl includes
+`network.snapshot`, `network.events.subscribe`, `wifi.set_enabled`,
+`wifi.scan.start`, `wifi.scan.status`, `wifi.connect`, `wifi.save`,
+`wifi.connect_saved`, `wifi.disconnect`, `wifi.forget`, `wifi.autoconnect`,
+`eth.set_dhcp`, and `eth.set_static`.
+
+`wifi.save` stores or updates credentials without selecting the profile. Its
+params are `ssid` (non-empty string), `password` (string), and optional
+`autoconnect` (boolean, default `true`).

@@ -122,6 +122,15 @@ def test_boolean_schema_is_strict(path: Path):
             raise AssertionError(f"wrong boolean schema error: {bad}")
 
 
+def test_save_schema_is_strict(path: Path):
+    with connect_ready(path) as sock:
+        bad = request(sock, 44, "wifi.save", {"ssid": "Lab WiFi"})
+        if bad.get("status") != 400:
+            raise AssertionError(f"missing password must be 400: {bad}")
+        if (bad.get("error") or {}).get("code") != "INVALID_PARAMS":
+            raise AssertionError(f"wrong save schema error: {bad}")
+
+
 def test_scan_status_is_immediate_and_explicit(path: Path):
     with connect_ready(path) as sock:
         started = time.monotonic()
@@ -173,6 +182,7 @@ def main():
         test_read_dispatch_and_persistent_session,
         test_write_method_schema_rejected_without_session_teardown,
         test_boolean_schema_is_strict,
+        test_save_schema_is_strict,
         test_scan_status_is_immediate_and_explicit,
         test_legacy_sync_scan_is_retired_from_v1,
         test_unknown_method_correlated_404,

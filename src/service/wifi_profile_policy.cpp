@@ -96,6 +96,47 @@ bool WifiProfilePolicy::connect_saved(const std::string &ssid,
     return activate_profile(network_id, false, error);
 }
 
+bool WifiProfilePolicy::save(const std::string &ssid,
+                             const std::string &password,
+                             bool autoconnect,
+                             std::string &error) const {
+    error.clear();
+    if (ssid.empty()) {
+        error = "ssid is required";
+        return false;
+    }
+    if (!ops_.ensure_interface_up || !ops_.find_profile || !ops_.create_profile ||
+        !ops_.configure_profile || !ops_.set_profile_enabled ||
+        !ops_.remove_profile || !ops_.save_profiles) {
+        error = "Wi-Fi profile platform ports are unavailable";
+        return false;
+    }
+    if (!ops_.ensure_interface_up(error)) return false;
+
+    int network_id = ops_.find_profile(ssid, error);
+    bool created = false;
+    if (network_id < 0) {
+        if (error.find("not found") == std::string::npos) return false;
+        error.clear();
+        network_id = ops_.create_profile(ssid, password, error);
+        if (network_id < 0) return false;
+        created = true;
+    } else if (!ops_.configure_profile(network_id, ssid, password, error)) {
+        return false;
+    }
+
+    if (ops_.set_profile_enabled(network_id, autoconnect, error) &&
+        ops_.save_profiles(error)) return true;
+
+    if (created) {
+        const std::string failure = error;
+        std::string ignored;
+        (void)ops_.remove_profile(network_id, ignored);
+        error = failure;
+    }
+    return false;
+}
+
 bool WifiProfilePolicy::forget(const std::string &ssid, std::string &error) const {
     error.clear();
     if (ssid.empty()) {

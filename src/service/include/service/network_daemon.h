@@ -58,6 +58,9 @@ public:
     NetworkOperationResult<WifiEnabledResult> wifi_set_enabled(bool enabled) const;
     NetworkOperationResult<WifiCommandResult> wifi_connect(const std::string &ssid,
                                                            const std::string &password) const;
+    NetworkOperationResult<WifiCommandResult> wifi_save(const std::string &ssid,
+                                                        const std::string &password,
+                                                        bool autoconnect) const;
     NetworkOperationResult<WifiCommandResult> wifi_connect_saved(const std::string &ssid) const;
     NetworkOperationResult<std::vector<WifiSavedNetwork>> wifi_list_saved() const;
     NetworkOperationResult<WifiCommandResult> wifi_forget(const std::string &ssid) const;

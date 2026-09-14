@@ -433,6 +433,24 @@ std::vector<std::uint8_t> dispatch_business_request(
                                   daemon.wifi_connect(ssid, password),
                                   ipc_representation::wifi_command_payload);
     }
+    if (method == "wifi.save") {
+        std::string ssid;
+        std::string password;
+        bool autoconnect = true;
+        std::string_view autoconnect_raw;
+        const bool has_autoconnect = member(params_json, "autoconnect", &autoconnect_raw);
+        if (!read_string(params_json, "ssid", &ssid) || ssid.empty() ||
+            !read_string(params_json, "password", &password) ||
+            (has_autoconnect &&
+             !read_bool(params_json, "autoconnect", &autoconnect))) {
+            return invalid_params(
+                request_id,
+                "wifi.save requires non-empty string ssid, string password, and optional boolean autoconnect");
+        }
+        return operation_response(request_id,
+                                  daemon.wifi_save(ssid, password, autoconnect),
+                                  ipc_representation::wifi_command_payload);
+    }
     if (method == "wifi.connect_saved") {
         std::string ssid;
         if (!read_string(params_json, "ssid", &ssid) || ssid.empty()) {

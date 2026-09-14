@@ -228,6 +228,49 @@ bool wifi_disconnect(const std::string &iface, std::string &error) {
     return wpa_ok(iface, "DISCONNECT", error);
 }
 
+bool wifi_configure_profile(const std::string &iface,
+                            int id,
+                            const std::string &ssid,
+                            const std::string &password,
+                            std::string &error) {
+    error.clear();
+    if (!is_safe_iface(iface) || !valid_network_id(id)) {
+        error = "invalid wifi iface";
+        return false;
+    }
+    if (ssid.empty()) {
+        error = "ssid is required";
+        return false;
+    }
+
+    std::string quoted_ssid;
+    if (!wpa_quote(ssid, quoted_ssid, error)) return false;
+    if (!wpa_ok(iface,
+                "SET_NETWORK " + std::to_string(id) + " ssid " + quoted_ssid,
+                error)) {
+        return false;
+    }
+
+    if (password.empty()) {
+        if (!wpa_ok(iface,
+                    "SET_NETWORK " + std::to_string(id) + " key_mgmt NONE",
+                    error)) {
+            return false;
+        }
+    } else {
+        std::string quoted_psk;
+        if (!wpa_quote(password, quoted_psk, error)) return false;
+        if (!wpa_ok(iface,
+                    "SET_NETWORK " + std::to_string(id) + " psk " + quoted_psk,
+                    error)) {
+            return false;
+        }
+    }
+
+    error.clear();
+    return true;
+}
+
 int wifi_create_profile(const std::string &iface,
                         const std::string &ssid,
                         const std::string &password,

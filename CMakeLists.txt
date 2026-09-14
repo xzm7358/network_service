@@ -72,11 +72,32 @@ add_library(NetworkService::Service ALIAS network_service_service)
 
 # IPC sees only public contracts plus Service/IPC headers. Platform/Config headers
 # are no longer transitively visible through NetworkService::Service.
+add_library(network_service_ipc_codec STATIC
+    src/ipc/network_ipc_v1_codec.cpp
+)
+target_include_directories(network_service_ipc_codec
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/ipc/include>
+)
+target_link_libraries(network_service_ipc_codec PUBLIC network_service_build_config)
+add_library(NetworkService::IpcCodec ALIAS network_service_ipc_codec)
+
+add_library(network_service_client STATIC
+    src/client/network_service_client.cpp
+)
+target_include_directories(network_service_client
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ipc/include
+)
+target_link_libraries(network_service_client PRIVATE NetworkService::IpcCodec)
+add_library(NetworkService::Client ALIAS network_service_client)
+
 add_library(network_service_ipc STATIC
     src/ipc/network_ipc_server.cpp
     src/ipc/network_ipc_representation.cpp
     src/ipc/network_ipc_v1_business_dispatch.cpp
-    src/ipc/network_ipc_v1_codec.cpp
     src/ipc/network_ipc_v1_event.cpp
     src/ipc/network_ipc_v1_outbound.cpp
     src/ipc/network_ipc_v1_rebase.cpp
@@ -89,6 +110,7 @@ target_include_directories(network_service_ipc
 target_link_libraries(network_service_ipc
     PUBLIC
         network_service_build_config
+        NetworkService::IpcCodec
         NetworkService::Service
 )
 add_library(NetworkService::IPC ALIAS network_service_ipc)
@@ -119,6 +141,15 @@ if(BUILD_TESTING OR NETWORK_SERVICE_BUILD_RC_PROBE)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(network_service_client_test
+        tests/network_service_client_test.cpp
+    )
+    target_link_libraries(network_service_client_test PRIVATE
+        NetworkService::Client
+        NetworkService::IpcCodec
+    )
+    add_test(NAME network_service_client COMMAND network_service_client_test)
+
     add_test(NAME route_ownership_guard
         COMMAND ${CMAKE_COMMAND}
             -DROOT=${CMAKE_CURRENT_SOURCE_DIR}

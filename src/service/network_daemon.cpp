@@ -290,6 +290,13 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
                                         std::string &error) {
         return network_service::wifi_create_profile(wifi_iface_, ssid, password, error);
     };
+    profile_ops.configure_profile = [this](int network_id,
+                                           const std::string &ssid,
+                                           const std::string &password,
+                                           std::string &error) {
+        return network_service::wifi_configure_profile(
+            wifi_iface_, network_id, ssid, password, error);
+    };
     profile_ops.find_profile = [this](const std::string &ssid, std::string &error) {
         return network_service::wifi_find_profile(wifi_iface_, ssid, error);
     };
@@ -527,6 +534,21 @@ NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_connect_saved(
         return NetworkOperationResult<WifiCommandResult>::failure(500, std::move(error));
     }
     return NetworkOperationResult<WifiCommandResult>::success(command_result("connect_saved"));
+}
+
+NetworkOperationResult<WifiCommandResult> NetworkDaemon::wifi_save(
+    const std::string &ssid,
+    const std::string &password,
+    bool autoconnect) const {
+    if (!wifi_profile_policy_) {
+        return NetworkOperationResult<WifiCommandResult>::failure(
+            500, "Wi-Fi profile policy unavailable");
+    }
+    std::string error;
+    if (!wifi_profile_policy_->save(ssid, password, autoconnect, error)) {
+        return NetworkOperationResult<WifiCommandResult>::failure(500, std::move(error));
+    }
+    return NetworkOperationResult<WifiCommandResult>::success(command_result("save"));
 }
 
 NetworkOperationResult<std::vector<WifiSavedNetwork>> NetworkDaemon::wifi_list_saved() const {

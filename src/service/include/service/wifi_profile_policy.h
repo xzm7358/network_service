@@ -9,6 +9,7 @@ namespace network_service {
 struct WifiProfilePolicyOps {
     std::function<bool(std::string &)> ensure_interface_up;
     std::function<int(const std::string &, const std::string &, std::string &)> create_profile;
+    std::function<bool(int, const std::string &, const std::string &, std::string &)> configure_profile;
     std::function<int(const std::string &, std::string &)> find_profile;
     std::function<bool(std::string &)> disable_all_profiles;
     std::function<bool(int, bool, std::string &)> set_profile_enabled;
@@ -25,6 +26,10 @@ public:
                      const std::string &password,
                      std::string &error) const;
     bool connect_saved(const std::string &ssid, std::string &error) const;
+    bool save(const std::string &ssid,
+              const std::string &password,
+              bool autoconnect,
+              std::string &error) const;
     bool forget(const std::string &ssid, std::string &error) const;
     bool set_autoconnect(const std::string &ssid,
                          bool enabled,

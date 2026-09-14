@@ -18,6 +18,11 @@ int wifi_create_profile(const std::string &iface,
                         const std::string &ssid,
                         const std::string &password,
                         std::string &error);
+bool wifi_configure_profile(const std::string &iface,
+                            int network_id,
+                            const std::string &ssid,
+                            const std::string &password,
+                            std::string &error);
 int wifi_find_profile(const std::string &iface,
                       const std::string &ssid,
                       std::string &error);

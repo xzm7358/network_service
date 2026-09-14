@@ -31,6 +31,7 @@ struct Harness {
     bool select_ok = true;
     bool remove_ok = true;
     bool save_ok = true;
+    bool profile_found = true;
 
     network_service::WifiProfilePolicy make_policy() {
         network_service::WifiProfilePolicyOps ops;
@@ -44,9 +45,15 @@ struct Harness {
             events.push_back("create:" + ssid + ":" + password);
             return profile_id;
         };
-        ops.find_profile = [this](const std::string &ssid, std::string &) {
+        ops.configure_profile = [this](int id, const std::string &ssid,
+                                       const std::string &password, std::string &) {
+            events.push_back("configure:" + std::to_string(id) + ":" + ssid + ":" + password);
+            return true;
+        };
+        ops.find_profile = [this](const std::string &ssid, std::string &error) {
             events.push_back("find:" + ssid);
-            return profile_id;
+            if (!profile_found) error = "saved network not found: " + ssid;
+            return profile_found ? profile_id : -1;
         };
         ops.disable_all_profiles = [this](std::string &error) {
             events.push_back("disable_all");
@@ -154,6 +161,16 @@ void test_autoconnect_owns_enable_and_persist_policy() {
                    "autoconnect policy order changed");
 }
 
+void test_save_updates_existing_profile_without_selecting_it() {
+    Harness h;
+    auto policy = h.make_policy();
+    std::string error;
+    require(policy.save("Guest", "secret", false, error), "save should update profile");
+    require_events(h.events,
+                   {"up", "find:Guest", "configure:7:Guest:secret", "disable:7", "save"},
+                   "save must not select the updated profile");
+}
+
 } // namespace
 
 int main() {
@@ -164,6 +181,7 @@ int main() {
         test_selection_failure_stops_sequence();
         test_forget_requires_persistence();
         test_autoconnect_owns_enable_and_persist_policy();
+        test_save_updates_existing_profile_without_selecting_it();
         std::cout << "Wi-Fi profile policy tests passed\n";
         return 0;
     } catch (const std::exception &e) {
