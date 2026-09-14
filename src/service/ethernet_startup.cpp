@@ -2,7 +2,20 @@
 
 #include <utility>
 
+#include "config/ethernet_config.h"
+
 namespace network_service {
+
+bool validate_ethernet_startup_config(const std::string &config_dir,
+                                      const std::string &iface,
+                                      std::string &method,
+                                      std::string &error) {
+    EthernetConfig config;
+    method.clear();
+    if (!load_ethernet_config(config_dir, iface, config, error)) return false;
+    method = config.method;
+    return true;
+}
 
 EthernetStartup::EthernetStartup(EthernetStartupOps ops)
     : ops_(std::move(ops)) {}

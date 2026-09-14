@@ -8,6 +8,11 @@
 
 namespace network_service {
 
+bool validate_ethernet_startup_config(const std::string &config_dir,
+                                      const std::string &iface,
+                                      std::string &method,
+                                      std::string &error);
+
 enum class EthernetDhcpAdoption {
     Absent = 0,
     Adopted,

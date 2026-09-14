@@ -3,7 +3,7 @@
 ## 状态
 
 - 发现日期：2026-09-14
-- 状态：DHCP 初始失败未在当前现场复现；错误默认路由已确认并完成临时规避；Realtek 断开清理错误待单独跟进
+- 状态：配置权威、启动收敛、Ethernet carrier 生命周期和 rcS 发布迁移已完成 host 实现；目标板冷启动/HIL 与 rcS 实际迁移待执行
 - 当前设备地址：`192.168.68.199`
 - 早期调试地址：`192.168.68.90`
 
@@ -31,6 +31,66 @@
 2. Offer 已到达无线网卡，但 Realtek 驱动或本地网络配置没有正确接收/应用。
 
 开发机已安装 ADB。早期从开发机访问板端时，`192.168.68.90:5555`/`192.168.68.199:5555` 曾出现不可达或 `offline`，因此当时不能取得板端实时证据；后续通过 telnet 9900 登录板端并重新拉起 `adbd` 后，ADB 已恢复为 `device`。
+
+## 最终根因分层结论（取代早期临时判断）
+
+### 1. 同一路由器与“可用二层网络”
+
+“两个接口接入同一个路由器”一般不能单独证明它们位于同一可互通二层广播域：路由器可能对有线和无线使用不同 VLAN、访客隔离、AP client isolation 或端口安全策略。因此早期把二者视为可能不同二层，是一个待验证假设。
+
+但在本次设备现场，`eth0`、`wlan0` 的 ARP 探测均能得到响应，并观察到跨接口广播；这些证据表明二者实际接入同一个二层广播域。故“它们并不连接同一个可用二层网络”不是本案的最终结论。准确说法是：**二层广播可达，不等于路由器会接受两个接口当前使用的三层源地址并为它们都转发流量。**
+
+### 2. `ping -I eth0 192.168.68.1` 为何 100% 丢包
+
+`-I eth0` 已把 ICMP 请求固定到 `eth0`，所以这不是默认路由误选 `wlan0`。现场抓取到的事实是：ARP 可解析网关，请求从 `eth0` 发出，但没有 Echo Reply 返回；相同网关经 `wlan0` 可达。因此丢包边界位于 `eth0` 请求发出之后、回复进入板端之前。
+
+`eth0=192.168.68.90/24` 是 `rcS` 无条件写入的静态地址，不是路由器 DHCP 给出的、由 NetworkService generation/lease 机制可验证的租约。与之相对，`wlan0=192.168.68.199/24` 来自 `192.168.68.1` 的 DHCP Offer/ACK。最符合现有证据的解释是路由器侧只接受/学习了 DHCP 授权的 `.199`，或对静态 `.90` 存在地址绑定、冲突/防欺骗策略；仅凭板端抓包还不能区分这些路由器内部机制。若切换为 eth0 DHCP 后仍失败，必须同时采集路由器/交换侧日志或镜像口报文，不能再归因于“不同二层”。
+
+### 3. 配置权威错位才是代码根因
+
+板端真实权威配置为：
+
+```text
+/data/network-service/ethernet.json
+{"mode":"dhcp"}
+```
+
+`/dnake/data` 虽链接到 `/data`，旧实现却读取不存在的 `/dnake/data/smart_hmi_ethernet.conf`，并且守护进程启动时根本不应用 Ethernet 持久化配置。因此：
+
+- `ethernet.json` 中的 `dhcp` 意图没有进入新 NetworkService；
+- `eth0` 的 `.90` 只能来自 `/etc/init.d/rcS`；
+- NetworkService 只管理了 `wlan0` 的 DHCP，无法把 `eth0` 收敛为产品要求的高优先级上行链路；
+- 人工给 eth0 加 metric 10 默认路由后，内核会优先选择实际不可达的 eth0，造成“Wi-Fi 已拿到租约但设备离线”。
+
+### 4. `eth0` 的产品角色
+
+`eth0` 不是永久的“仅调试管理链路”。它是正常上行接口，默认优先级高于 Wi-Fi：健康的 Ethernet 使用 metric 10，Wi-Fi 使用 metric 20。此前只保留到开发机的 eth0 `/32` 路由，是现场排障期间为了不丢失 telnet/ADB 的临时措施，不是产品策略。
+
+## 已实施的正确修复
+
+1. `/data/network-service/ethernet.json` 成为唯一写入权威；支持 DHCP/static JSON 校验与原子提交。JSON 缺失时可一次性导入旧 `smart_hmi_ethernet.conf`，JSON 一旦存在就绝不回退。
+2. NetworkService 启动先校验权威配置，再启动/接管 eth0 DHCP 或应用静态配置；无效 JSON 不修改仍存活的 brownfield 链路。
+3. 新增 Ethernet carrier 生命周期：断线时撤销 NetworkService 精确拥有的 IP/默认路由/DNS，恢复时重启 DHCP 或重放静态配置；DHCP 进程意外退出后按 1/2/4/8/8 秒最多重试 5 次。这样健康 eth0 优先，eth0 失效时 Wi-Fi 才能真实接管。
+4. 守护进程和监督脚本默认配置根目录改为 `/data`。新增 `ethernet-json-v1` 能力检查和配置校验入口。
+5. 提供 `network_service_migrate_rcs_ethernet` 发布迁移工具。它仅删除精确的 `ifconfig eth0 192.168.68.90` 命令，保留其他 rcS 内容和权限，首次执行保留恢复备份；新服务能力或 `ethernet.json` 校验失败时拒绝修改。
+
+## `/etc/init.d/rcS` 静态 `.90` 是否还有必要
+
+结论分两个发布阶段：
+
+- **新 NetworkService 部署和目标板回归完成之前：暂时保留。** 它仍是旧镜像唯一的 eth0 IPv4 来源，过早删除可能失去调试入口。
+- **新服务通过冷启动、网线拔插、服务重启、DHCP 失败和 Wi-Fi failover 后：必须删除。** 继续保留会形成 rcS 与 `ethernet.json` 两个配置权威，并可能在 DHCP 前后留下冲突地址或错误的高优先级路由。
+
+目标板迁移命令为：
+
+```sh
+NETWORK_SERVICE_BIN=/dnake/bin/network_service \
+NETWORK_SERVICE_CONFIG_DIR=/data \
+RCS_PATH=/etc/init.d/rcS \
+/dnake/bin/network_service_migrate_rcs_ethernet
+```
+
+迁移后应确认 `/etc/init.d/rcS.pre-network-service` 备份存在，并执行完整冷启动验证；不要在当前远程调试会话中直接手工删行来代替发布迁移。
 
 ## 新增板端证据
 

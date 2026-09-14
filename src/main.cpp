@@ -13,6 +13,7 @@
 #include "ipc/network_ipc_server.h"
 #include "network_service_protocol.h"
 #include "service/network_daemon.h"
+#include "service/ethernet_startup.h"
 
 namespace {
 
@@ -89,13 +90,17 @@ struct Options {
     std::string socket_path = network_service::kDefaultSocketPath;
     std::string eth_iface = "eth0";
     std::string wifi_iface = "wlan0";
-    std::string config_dir = "/dnake/data";
+    std::string config_dir = "/data";
     std::string event_dir = "/var/run/wpa_supplicant";
+    std::string capability;
+    bool validate_ethernet_config = false;
 };
 
 void print_usage(const char *argv0) {
     std::cerr << "Usage: " << argv0
-              << " [--socket PATH] [--eth IFACE] [--wifi IFACE] [--config-dir DIR] [--event-dir DIR]\n";
+              << " [--socket PATH] [--eth IFACE] [--wifi IFACE]"
+              << " [--config-dir DIR] [--event-dir DIR]"
+              << " [--check-capability NAME] [--validate-ethernet-config]\n";
 }
 
 bool parse_args(int argc, char **argv, Options &options) {
@@ -117,6 +122,10 @@ bool parse_args(int argc, char **argv, Options &options) {
             if (!require_value(options.config_dir)) return false;
         } else if (arg == "--event-dir") {
             if (!require_value(options.event_dir)) return false;
+        } else if (arg == "--check-capability") {
+            if (!require_value(options.capability)) return false;
+        } else if (arg == "--validate-ethernet-config") {
+            options.validate_ethernet_config = true;
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return false;
@@ -134,6 +143,25 @@ int main(int argc, char **argv) {
     Options options;
     if (!parse_args(argc, argv, options)) {
         return 1;
+    }
+    if (!options.capability.empty()) {
+        if (options.capability == "ethernet-json-v1") {
+            std::cout << options.capability << std::endl;
+            return 0;
+        }
+        std::cerr << "Unsupported capability: " << options.capability << std::endl;
+        return 1;
+    }
+    if (options.validate_ethernet_config) {
+        std::string method;
+        std::string error;
+        if (!network_service::validate_ethernet_startup_config(
+                options.config_dir, options.eth_iface, method, error)) {
+            std::cerr << "Invalid Ethernet configuration: " << error << std::endl;
+            return 1;
+        }
+        std::cout << method << std::endl;
+        return 0;
     }
 
     ProcessSingletonLock process_lock;

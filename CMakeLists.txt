@@ -193,6 +193,21 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/network_service_supervisor_test.sh
             ${CMAKE_CURRENT_SOURCE_DIR}/packaging/S40network_service)
 
+    add_test(NAME rcs_ethernet_migration
+        COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rcs_ethernet_migration_test.sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/packaging/migrate_rcs_ethernet.sh
+            $<TARGET_FILE:network_service>)
+
+    add_test(NAME ethernet_json_capability
+        COMMAND $<TARGET_FILE:network_service>
+            --check-capability ethernet-json-v1)
+
+    add_test(NAME ethernet_config_validation
+        COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/ethernet_config_validation_test.sh
+            $<TARGET_FILE:network_service>)
+
     add_executable(network_ipc_v1_codec_test
         tests/network_ipc_v1_codec_test.cpp
     )
@@ -345,6 +360,10 @@ install(TARGETS ${NETWORK_SERVICE_TARGET}
 
 install(TARGETS networkctl
     RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
+
+install(PROGRAMS packaging/migrate_rcs_ethernet.sh
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/bin"
+    RENAME network_service_migrate_rcs_ethernet)
 
 if(NETWORK_SERVICE_BUILD_RC_PROBE)
     install(TARGETS network_service_rc_probe

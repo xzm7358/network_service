@@ -5,7 +5,7 @@ SOCKET_PATH=${NETWORK_SERVICE_SOCKET:-/tmp/smart_hmi_network.sock}
 ETH_IFACE=${NETWORK_SERVICE_ETH:-eth0}
 WIFI_IFACE=${NETWORK_SERVICE_WIFI:-wlan0}
 EVENT_DIR=${NETWORK_SERVICE_EVENT_DIR:-/var/run/wpa_supplicant}
-CONFIG_DIR=${NETWORK_SERVICE_CONFIG_DIR:-/dnake/data}
+CONFIG_DIR=${NETWORK_SERVICE_CONFIG_DIR:-/data}
 BIN=${NETWORK_SERVICE_BIN:-/dnake/bin/network_service}
 RESTART_DELAY=${NETWORK_SERVICE_RESTART_DELAY:-2}
 START_CHECK_SECONDS=${NETWORK_SERVICE_START_CHECK_SECONDS:-4}
@@ -32,8 +32,16 @@ read_pidfile() {
 
 read_cmdline() {
   pid=$1
-  [ -r "/proc/$pid/cmdline" ] || return 1
-  tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null
+  if [ -r "/proc/$pid/cmdline" ]; then
+    tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null
+    return $?
+  fi
+
+  # Host packaging regressions also run on macOS, where procfs is absent.
+  # Target Linux continues to use the exact /proc identity above; ps is only a
+  # fallback for systems without that mechanism.
+  command -v ps >/dev/null 2>&1 || return 1
+  ps -p "$pid" -o command= 2>/dev/null
 }
 
 supervisor_pid_valid() {

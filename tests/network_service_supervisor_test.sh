@@ -58,12 +58,13 @@ trap cleanup EXIT INT TERM HUP
 
 wait_for_child() {
   previous=${1:-}
+  WAITED_CHILD=
   attempt=0
   while [ "$attempt" -lt 10 ]; do
     if [ -r "$CHILD_PIDFILE" ]; then
       IFS= read -r pid < "$CHILD_PIDFILE" || pid=
       if [ -n "$pid" ] && [ "$pid" != "$previous" ] && kill -0 "$pid" 2>/dev/null; then
-        printf '%s\n' "$pid"
+        WAITED_CHILD=$pid
         return 0
       fi
     fi
@@ -77,10 +78,11 @@ run_init start >/dev/null
 
 # The first fake daemon exits with 42. A successful start therefore proves the
 # supervisor restarted it and published a later live child.
-child=$(wait_for_child "") || {
+wait_for_child "" || {
   echo "network_service_supervisor_test: no live child after initial crash" >&2
   exit 1
 }
+child=$WAITED_CHILD
 
 count=0
 IFS= read -r count < "$COUNT"
@@ -93,10 +95,11 @@ run_init status >/dev/null
 
 # Kill the stable child and require a distinct replacement PID.
 kill -KILL "$child"
-replacement=$(wait_for_child "$child") || {
+wait_for_child "$child" || {
   echo "network_service_supervisor_test: child was not restarted after SIGKILL" >&2
   exit 1
 }
+replacement=$WAITED_CHILD
 
 if [ "$replacement" = "$child" ]; then
   echo "network_service_supervisor_test: replacement PID did not change" >&2
