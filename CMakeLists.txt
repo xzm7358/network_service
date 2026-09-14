@@ -134,6 +134,9 @@ target_link_libraries(networkctl
     PRIVATE
         NetworkService::Client
 )
+# tools/networkctl.cpp uses std::string_view; the superbuild baseline is C++14
+# and NetworkService::Client does not propagate the C++17 requirement.
+target_compile_features(networkctl PRIVATE cxx_std_17)
 set_target_properties(networkctl PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/app/smartcontrol/dnake/bin"
 )
