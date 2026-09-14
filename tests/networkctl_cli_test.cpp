@@ -324,6 +324,10 @@ void runScenario(int listener,
 int main(int argc, char **argv) {
     assert(argc == 2);
     const std::string binary = argv[1];
+    if (::access(binary.c_str(), X_OK) != 0) {
+        std::cerr << "networkctl test binary is not executable: " << binary << '\n';
+        return 1;
+    }
 
     char directory[] = "/tmp/networkctl-test-XXXXXX";
     assert(::mkdtemp(directory) != nullptr);

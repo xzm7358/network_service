@@ -170,8 +170,10 @@ if(BUILD_TESTING)
         tests/networkctl_cli_test.cpp
     )
     target_link_libraries(networkctl_cli_test PRIVATE NetworkService::IpcCodec)
+    add_dependencies(networkctl_cli_test networkctl)
     add_test(NAME networkctl_cli
         COMMAND networkctl_cli_test $<TARGET_FILE:networkctl>)
+    set_tests_properties(networkctl_cli PROPERTIES TIMEOUT 30)
 
     add_test(NAME route_ownership_guard
         COMMAND ${CMAKE_COMMAND}
@@ -320,6 +322,9 @@ if(BUILD_TESTING)
     )
     target_link_libraries(udhcpc_process_test PRIVATE NetworkService::Platform)
     add_test(NAME udhcpc_process COMMAND udhcpc_process_test)
+    set_tests_properties(udhcpc_process PROPERTIES
+        SKIP_RETURN_CODE 77
+        TIMEOUT 30)
 
     add_executable(netlink_monitor_test
         tests/netlink_monitor_test.cpp

@@ -129,6 +129,11 @@ int main() {
     ok = expect(access(script.c_str(), F_OK) != 0,
                 "generation-scoped callback script should be removed with DHCP stop") && ok;
 
+#if !defined(__linux__)
+    std::cout << "udhcpc_process_test: SKIP live ownership requires Linux /proc\n";
+    return 77;
+#endif
+
     const std::string fake_dir = "/tmp/network_service_udhcpc_test_" +
                                  std::to_string(static_cast<long>(getpid()));
     const std::string fake_udhcpc = fake_dir + "/udhcpc";
