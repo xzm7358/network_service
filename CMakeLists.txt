@@ -48,6 +48,7 @@ add_library(NetworkService::Platform ALIAS network_service_platform)
 # implementation dependency only: its headers/libraries are available while
 # compiling Service, but are not exported to Service consumers such as IPC.
 add_library(network_service_service STATIC
+    src/service/ethernet_startup.cpp
     src/service/network_control_plane.cpp
     src/service/network_control_plane_reconcile.cpp
     src/service/network_daemon.cpp
@@ -250,6 +251,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(network_control_plane_test PRIVATE NetworkService::Service)
     add_test(NAME network_control_plane COMMAND network_control_plane_test)
+
+    add_executable(ethernet_startup_test
+        tests/ethernet_startup_test.cpp
+    )
+    target_link_libraries(ethernet_startup_test PRIVATE NetworkService::Service)
+    add_test(NAME ethernet_startup COMMAND ethernet_startup_test)
 
     add_executable(dns_brownfield_ownership_test
         tests/dns_brownfield_ownership_test.cpp

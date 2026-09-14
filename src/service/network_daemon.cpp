@@ -16,6 +16,7 @@
 #include "platform/udhcpc_process.h"
 #include "platform/wifi_backend.h"
 #include "platform/wpa_event_monitor.h"
+#include "service/ethernet_startup.h"
 #include "service/network_control_plane.h"
 #include "service/network_state.h"
 #include "service/wifi_manager.h"
@@ -75,15 +76,18 @@ static WifiCommandResult command_result(std::string requested) {
     return result;
 }
 
-static void adopt_existing_dhcp(const std::string &iface,
-                                NetworkControlPlane &control_plane,
-                                WifiManager *wifi_manager) {
+static EthernetDhcpAdoption adopt_existing_dhcp(const std::string &iface,
+                                                NetworkControlPlane &control_plane,
+                                                WifiManager *wifi_manager,
+                                                std::string &result_error) {
+    result_error.clear();
     UdhcpcProbeResult probe;
     std::string error;
     if (!UdhcpcProcess::probe(iface, probe, error)) {
         std::cerr << "network_service: DHCP_BROWNFIELD_PROBE_FAILED iface="
                   << iface << " error=" << error << std::endl;
-        return;
+        result_error = error;
+        return EthernetDhcpAdoption::Failed;
     }
 
     switch (probe.state) {
@@ -91,7 +95,8 @@ static void adopt_existing_dhcp(const std::string &iface,
         if (!control_plane.adopt_dhcp(iface, error)) {
             std::cerr << "network_service: DHCP_BROWNFIELD_ADOPT_FAILED iface="
                       << iface << " error=" << error << std::endl;
-            return;
+            result_error = error;
+            return EthernetDhcpAdoption::Failed;
         }
         if (wifi_manager) wifi_manager->adopt_dhcp_running();
         std::cerr << "network_service: DHCP_BROWNFIELD_ADOPTED iface=" << iface
@@ -99,22 +104,23 @@ static void adopt_existing_dhcp(const std::string &iface,
                   << " generation=" << probe.generation
                   << " lease=" << (probe.lease_exists ? "present" : "pending")
                   << std::endl;
-        return;
+        return EthernetDhcpAdoption::Adopted;
 
     case UdhcpcOwnershipState::StaleArtifacts:
         UdhcpcProcess::cleanup_stale(iface);
         std::cerr << "network_service: DHCP_BROWNFIELD_STALE_CLEANUP iface="
                   << iface << std::endl;
-        return;
+        return EthernetDhcpAdoption::Absent;
 
     case UdhcpcOwnershipState::ConflictingProcess:
         std::cerr << "network_service: DHCP_BROWNFIELD_CONFLICT iface=" << iface
                   << " pid=" << probe.pid << std::endl;
-        return;
+        result_error = "conflicting DHCP process on " + iface;
+        return EthernetDhcpAdoption::Conflict;
 
     case UdhcpcOwnershipState::Absent:
     default:
-        return;
+        return EthernetDhcpAdoption::Absent;
     }
 }
 
@@ -277,8 +283,33 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
     // processes before WPA monitoring can emit a CONNECTED event and start a
     // duplicate lifecycle.
     if (!snapshot_provider_) {
-        adopt_existing_dhcp(eth_iface_, *control_plane_, nullptr);
-        adopt_existing_dhcp(wifi_iface_, *control_plane_, wifi_manager_.get());
+        EthernetStartupOps ethernet_ops;
+        ethernet_ops.load_config = [this](EthernetConfig &config, std::string &error) {
+            return load_ethernet_config(config_dir_, eth_iface_, config, error);
+        };
+        ethernet_ops.try_adopt_dhcp = [this](std::string &error) {
+            return adopt_existing_dhcp(
+                eth_iface_, *control_plane_, nullptr, error);
+        };
+        ethernet_ops.start_dhcp = [this](std::string &error) {
+            return control_plane_->start_dhcp(eth_iface_, error);
+        };
+        ethernet_ops.apply_static = [this](const EthernetConfig &config,
+                                           std::string &error) {
+            return apply_ethernet_runtime(
+                *control_plane_, eth_iface_, config, error);
+        };
+
+        EthernetStartup ethernet_startup(std::move(ethernet_ops));
+        std::string ethernet_error;
+        if (!ethernet_startup.converge(ethernet_error)) {
+            std::cerr << "network_service: ETHERNET_STARTUP_CONVERGE_FAILED iface="
+                      << eth_iface_ << " error=" << ethernet_error << std::endl;
+        }
+
+        std::string wifi_adoption_error;
+        (void)adopt_existing_dhcp(
+            wifi_iface_, *control_plane_, wifi_manager_.get(), wifi_adoption_error);
     }
 
     WifiProfilePolicyOps profile_ops;
