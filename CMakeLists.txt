@@ -127,6 +127,17 @@ set_target_properties(${NETWORK_SERVICE_TARGET} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/app/smartcontrol/dnake/bin"
 )
 
+add_executable(networkctl
+    tools/networkctl.cpp
+)
+target_link_libraries(networkctl
+    PRIVATE
+        NetworkService::Client
+)
+set_target_properties(networkctl PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/app/smartcontrol/dnake/bin"
+)
+
 include(CTest)
 
 # The RC probe is built automatically by host test configurations so its code
@@ -149,6 +160,13 @@ if(BUILD_TESTING)
         NetworkService::IpcCodec
     )
     add_test(NAME network_service_client COMMAND network_service_client_test)
+
+    add_executable(networkctl_cli_test
+        tests/networkctl_cli_test.cpp
+    )
+    target_link_libraries(networkctl_cli_test PRIVATE NetworkService::IpcCodec)
+    add_test(NAME networkctl_cli
+        COMMAND networkctl_cli_test $<TARGET_FILE:networkctl>)
 
     add_test(NAME route_ownership_guard
         COMMAND ${CMAKE_COMMAND}
@@ -306,6 +324,9 @@ if(BUILD_TESTING)
 endif()
 
 install(TARGETS ${NETWORK_SERVICE_TARGET}
+    RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
+
+install(TARGETS networkctl
     RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
 
 if(NETWORK_SERVICE_BUILD_RC_PROBE)

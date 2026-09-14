@@ -50,6 +50,26 @@ and snapshot rebase. The contract and migration history are documented in:
 The C++ client is exposed as the CMake target `NetworkService::Client` through
 `network_service/v1_client.h`.
 
+## Native debug CLI
+
+The `networkctl` target is a native C++ debug client linked directly against
+`NetworkService::Client`. It uses the v1 `NSP1` session protocol and has no
+JSON or other runtime dependency outside the NetworkService client library.
+
+```text
+networkctl [--socket PATH] status
+networkctl [--socket PATH] scan
+networkctl [--socket PATH] wifi-on
+networkctl [--socket PATH] wifi-off
+networkctl [--socket PATH] connect <ssid> <psk>
+networkctl [--socket PATH] subscribe
+```
+
+`status` prints the authoritative snapshot JSON. `scan` starts a scan and
+polls its v1 lifecycle until results are ready; service-side failures are
+printed unchanged so diagnostics such as `wpa_ctrl connect failed` remain
+visible. `subscribe` prints one raw JSON event per line until interrupted.
+
 ## EEP Brownfield Adoption
 
 This repository adopts Embedded Engineering Platform release `1.20.0` in brownfield mode. Machine-readable adoption metadata lives in `.eep/`.
