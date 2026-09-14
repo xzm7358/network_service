@@ -1,4 +1,5 @@
 #!/bin/sh
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 SOCKET_PATH=${NETWORK_SERVICE_SOCKET:-/tmp/smart_hmi_network.sock}
 ETH_IFACE=${NETWORK_SERVICE_ETH:-eth0}
@@ -82,6 +83,30 @@ cleanup_stale_supervisor_artifacts() {
   fi
 }
 
+start_wpa_supplicant_if_needed() {
+  [ -d "/sys/class/net/$WIFI_IFACE" ] || return 1
+  pidof wpa_supplicant >/dev/null 2>&1 && return 0
+
+  wpa_conf="$CONFIG_DIR/network-service/wpa_supplicant.conf"
+  if [ -f "$wpa_conf" ]; then
+    echo "Device $WIFI_IFACE ready: launching wpa_supplicant with $wpa_conf..."
+    wpa_supplicant -B -i "$WIFI_IFACE" -c "$wpa_conf" >/dev/null 2>&1 || true
+  elif [ -f "/etc/wpa_supplicant.conf" ]; then
+    echo "Device $WIFI_IFACE ready: launching wpa_supplicant with /etc/wpa_supplicant.conf..."
+    wpa_supplicant -B -i "$WIFI_IFACE" -c "/etc/wpa_supplicant.conf" >/dev/null 2>&1 || true
+  else
+    echo "Device $WIFI_IFACE ready: launching wpa_supplicant with ctrl_interface $EVENT_DIR..."
+    wpa_supplicant -B -i "$WIFI_IFACE" -C "$EVENT_DIR" >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
+ensure_wpa_environment() {
+  mkdir -p "$EVENT_DIR"
+  chmod 755 "$EVENT_DIR" 2>/dev/null || true
+  start_wpa_supplicant_if_needed || true
+}
+
 run_supervisor() {
   cleanup_stale_supervisor_artifacts
 
@@ -105,10 +130,14 @@ run_supervisor() {
 
   stopping=0
   child_pid=
+  watchdog_pid=
   final_rc=0
 
   request_stop() {
     stopping=1
+    if [ -n "$watchdog_pid" ]; then
+      kill "$watchdog_pid" 2>/dev/null || true
+    fi
     if [ -n "$child_pid" ] && child_pid_valid "$child_pid"; then
       kill -TERM "$child_pid" 2>/dev/null || true
     fi
@@ -116,7 +145,18 @@ run_supervisor() {
 
   trap 'request_stop' TERM INT HUP
 
+  wpa_watchdog() {
+    while [ "$stopping" -eq 0 ]; do
+      start_wpa_supplicant_if_needed || true
+      sleep 2
+    done
+  }
+  wpa_watchdog &
+  watchdog_pid=$!
+
   while [ "$stopping" -eq 0 ]; do
+    ensure_wpa_environment
+
     "$BIN" \
       --socket "$SOCKET_PATH" \
       --eth "$ETH_IFACE" \
@@ -144,6 +184,10 @@ run_supervisor() {
     echo "network_service exited unexpectedly: rc=$rc; restart in ${RESTART_DELAY}s"
     sleep "$RESTART_DELAY"
   done
+
+  if [ -n "$watchdog_pid" ]; then
+    kill "$watchdog_pid" 2>/dev/null || true
+  fi
 
   trap - TERM INT HUP
   rm -f "$CHILD_PIDFILE" "$SUPERVISOR_PIDFILE"
