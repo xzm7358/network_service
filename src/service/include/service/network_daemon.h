@@ -18,6 +18,7 @@ namespace network_service {
 
 class NetlinkMonitor;
 class NetworkControlPlane;
+class EthernetManager;
 class WifiManager;
 class WifiProfilePolicy;
 class WpaEventMonitor;
@@ -47,11 +48,11 @@ public:
     NetworkOperationResult<RoutePolicyInfo> route_policy_apply(RoutePolicy policy);
     NetworkOperationResult<WpaEventsView> wpa_events() const;
     NetworkOperationResult<EthernetConfig> eth_get_config() const;
-    NetworkOperationResult<EthernetConfig> eth_set_dhcp() const;
+    NetworkOperationResult<EthernetConfig> eth_set_dhcp();
     NetworkOperationResult<EthernetConfig> eth_set_static(const std::string &ip,
                                                           const std::string &mask,
                                                           const std::string &gateway,
-                                                          const std::string &dns) const;
+                                                          const std::string &dns);
     NetworkOperationResult<std::vector<WifiApRecord>> wifi_scan() const;
     NetworkOperationResult<WifiScanStatus> wifi_scan_start();
     NetworkOperationResult<WifiScanStatus> wifi_scan_status();
@@ -69,11 +70,14 @@ public:
     NetworkOperationResult<WifiCommandResult> wifi_disconnect() const;
 
 private:
+    bool reconcile_ethernet_lifecycle();
+
     std::string eth_iface_;
     std::string wifi_iface_;
     std::string config_dir_;
     SnapshotProvider snapshot_provider_;
     std::unique_ptr<NetworkControlPlane> control_plane_;
+    std::unique_ptr<EthernetManager> ethernet_manager_;
     std::unique_ptr<WifiManager> wifi_manager_;
     std::unique_ptr<WifiProfilePolicy> wifi_profile_policy_;
     std::unique_ptr<WpaEventMonitor> wpa_monitor_;

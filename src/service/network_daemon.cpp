@@ -16,6 +16,7 @@
 #include "platform/udhcpc_process.h"
 #include "platform/wifi_backend.h"
 #include "platform/wpa_event_monitor.h"
+#include "service/ethernet_manager.h"
 #include "service/ethernet_startup.h"
 #include "service/network_control_plane.h"
 #include "service/network_state.h"
@@ -263,6 +264,20 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
     };
 
     control_plane_.reset(new NetworkControlPlane(eth_iface_, wifi_iface_, std::move(ops)));
+    ethernet_manager_.reset(new EthernetManager(
+        [this](std::string &error) {
+            if (!control_plane_) {
+                error = "network control plane unavailable";
+                return false;
+            }
+            return control_plane_->start_dhcp(eth_iface_, error);
+        },
+        [this]() {
+            if (control_plane_) control_plane_->stop_dhcp(eth_iface_);
+        },
+        [this]() {
+            return UdhcpcProcess::is_running(eth_iface_);
+        }));
     wifi_manager_.reset(new WifiManager(
         [this](std::string &error) {
             if (!control_plane_) {
@@ -288,16 +303,30 @@ NetworkDaemon::NetworkDaemon(std::string eth_iface,
             return load_ethernet_config(config_dir_, eth_iface_, config, error);
         };
         ethernet_ops.try_adopt_dhcp = [this](std::string &error) {
-            return adopt_existing_dhcp(
+            const EthernetDhcpAdoption adoption = adopt_existing_dhcp(
                 eth_iface_, *control_plane_, nullptr, error);
+            if (adoption == EthernetDhcpAdoption::Adopted && ethernet_manager_) {
+                ethernet_manager_->adopt_dhcp_running();
+            }
+            return adoption;
         };
         ethernet_ops.start_dhcp = [this](std::string &error) {
-            return control_plane_->start_dhcp(eth_iface_, error);
+            return ethernet_manager_ && ethernet_manager_->start_dhcp_now(error);
         };
         ethernet_ops.apply_static = [this](const EthernetConfig &config,
                                            std::string &error) {
-            return apply_ethernet_runtime(
-                *control_plane_, eth_iface_, config, error);
+            if (!apply_ethernet_runtime(
+                    *control_plane_, eth_iface_, config, error)) {
+                return false;
+            }
+            if (ethernet_manager_) {
+                ethernet_manager_->set_static_mode(
+                    [this, config](std::string &restore_error) {
+                        return apply_ethernet_runtime(
+                            *control_plane_, eth_iface_, config, restore_error);
+                    });
+            }
+            return true;
         };
 
         EthernetStartup ethernet_startup(std::move(ethernet_ops));
@@ -399,8 +428,16 @@ bool NetworkDaemon::reconcile(std::string &error) {
         error = "network control plane unavailable";
         return false;
     }
+    (void)reconcile_ethernet_lifecycle();
     if (wifi_manager_) (void)wifi_manager_->reconcile_dhcp_process();
     return control_plane_->reconcile(error);
+}
+
+bool NetworkDaemon::reconcile_ethernet_lifecycle() {
+    if (!ethernet_manager_ || snapshot_provider_) return false;
+    const NetworkSnapshot live =
+        read_live_snapshot(eth_iface_.c_str(), wifi_iface_.c_str());
+    return ethernet_manager_->reconcile(live.eth.exists && live.eth.carrier_up);
 }
 
 bool NetworkDaemon::refresh_external_state(std::string &error) {
@@ -419,8 +456,11 @@ bool NetworkDaemon::consume_network_events(bool &changed, std::string &error) {
     changed = false;
     error.clear();
     if (!netlink_monitor_) return true;
-    if (!netlink_monitor_->drain(changed, error)) return false;
-    if (!changed) return true;
+    bool kernel_changed = false;
+    if (!netlink_monitor_->drain(kernel_changed, error)) return false;
+    if (!kernel_changed) return true;
+    const bool lifecycle_changed = reconcile_ethernet_lifecycle();
+    changed = kernel_changed || lifecycle_changed;
     return refresh_external_state(error);
 }
 
@@ -460,7 +500,7 @@ NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_get_config() const {
         load_ethernet_config(config_dir_, eth_iface_));
 }
 
-NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_set_dhcp() const {
+NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_set_dhcp() {
     EthernetConfig config = load_ethernet_config(config_dir_, eth_iface_);
     config.iface = eth_iface_;
     config.method = "dhcp";
@@ -471,17 +511,22 @@ NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_set_dhcp() const {
     config.route_metric = 10;
     config.dns_enabled = true;
 
-    return apply_ethernet_transaction(control_plane_.get(),
-                                      config_dir_,
-                                      eth_iface_,
-                                      std::move(config));
+    NetworkOperationResult<EthernetConfig> result =
+        apply_ethernet_transaction(control_plane_.get(),
+                                   config_dir_,
+                                   eth_iface_,
+                                   std::move(config));
+    if (result.ok() && ethernet_manager_) {
+        ethernet_manager_->adopt_dhcp_running();
+    }
+    return result;
 }
 
 NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_set_static(
     const std::string &ip,
     const std::string &mask,
     const std::string &gateway,
-    const std::string &dns) const {
+    const std::string &dns) {
     EthernetConfig config = load_ethernet_config(config_dir_, eth_iface_);
     config.iface = eth_iface_;
     config.method = "static";
@@ -492,10 +537,20 @@ NetworkOperationResult<EthernetConfig> NetworkDaemon::eth_set_static(
     config.route_metric = 10;
     config.dns_enabled = !dns.empty();
 
-    return apply_ethernet_transaction(control_plane_.get(),
-                                      config_dir_,
-                                      eth_iface_,
-                                      std::move(config));
+    NetworkOperationResult<EthernetConfig> result =
+        apply_ethernet_transaction(control_plane_.get(),
+                                   config_dir_,
+                                   eth_iface_,
+                                   std::move(config));
+    if (result.ok() && ethernet_manager_) {
+        const EthernetConfig committed = result.value;
+        ethernet_manager_->set_static_mode(
+            [this, committed](std::string &error) {
+                return apply_ethernet_runtime(
+                    *control_plane_, eth_iface_, committed, error);
+            });
+    }
+    return result;
 }
 
 NetworkOperationResult<std::vector<WifiApRecord>> NetworkDaemon::wifi_scan() const {

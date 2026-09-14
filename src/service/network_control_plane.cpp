@@ -136,6 +136,7 @@ void NetworkControlPlane::stop_dhcp(const std::string &iface) {
     if (ops_.clear_ipv4) (void)ops_.clear_ipv4(iface, ignored);
 
     link_for(iface) = LinkState{};
+    if (iface == eth_iface_) static_eth_ = StaticEthernetState{};
     (void)recompute_dns_locked(ignored);
 }
 

@@ -13,7 +13,8 @@ bool NetworkDaemon::reconcile(bool &changed, std::string &error) {
         return false;
     }
 
-    const bool dhcp_process_changed =
+    const bool ethernet_lifecycle_changed = reconcile_ethernet_lifecycle();
+    const bool wifi_dhcp_process_changed =
         wifi_manager_ && wifi_manager_->reconcile_dhcp_process();
 
     // A production target without a usable kernel event source must retain the
@@ -27,7 +28,7 @@ bool NetworkDaemon::reconcile(bool &changed, std::string &error) {
 
     bool network_changed = false;
     const bool ok = control_plane_->reconcile(network_changed, error);
-    changed = dhcp_process_changed || network_changed;
+    changed = ethernet_lifecycle_changed || wifi_dhcp_process_changed || network_changed;
     return ok;
 }
 

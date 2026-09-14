@@ -373,6 +373,11 @@ int main() {
                          "192.168.50.1",
                          10),
                 "stop must withdraw only the exact owned static route") && ok;
+    static_repair.reset_observations();
+    ok = expect(static_plane.refresh_external_state(error),
+                "stopped static refresh failed") && ok;
+    ok = expect(static_repair.ip_applies.empty() && static_repair.routes.empty(),
+                "stopped static lifecycle was resurrected by drift repair") && ok;
 
     return ok ? 0 : 1;
 }

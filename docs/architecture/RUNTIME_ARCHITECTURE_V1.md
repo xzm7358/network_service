@@ -13,9 +13,9 @@ The design target is a small, explicit network control plane suitable for a 64 M
                       |
                       v
              NetworkControlPlane
-                 /          \
-                v            v
-         WifiManager     NetworkState
+              /       |       \
+             v        v        v
+ EthernetManager WifiManager NetworkState
                 |
                 v
          Platform Ports
@@ -58,7 +58,7 @@ The final `network_service` executable contains the composition entry point and 
 2. **Service / Policy** owns orchestration, lifecycle decisions, route/DNS policy and normalized network truth. It consumes facts from Platform and decides what operation happens next.
 3. **Platform** owns Linux/daemon/persistence mechanisms only. Platform does not decide retry policy, preferred interface, UI state or product route/DNS policy.
 4. `CTRL-EVENT-CONNECTED` is an **L2 fact**. It is not DHCP success and is not network readiness.
-5. DHCP process ownership is singular. Wi-Fi and Ethernet share `UdhcpcProcess`; Wi-Fi L2-to-DHCP lifecycle decisions belong to `WifiManager`.
+5. DHCP process ownership is singular. Wi-Fi and Ethernet share `UdhcpcProcess`; Wi-Fi L2-to-DHCP lifecycle decisions belong to `WifiManager`, while Ethernet carrier/config/retry decisions belong to `EthernetManager`.
 6. The udhcpc callback is a **Lease Fact producer only**. It must not configure route or DNS policy.
 7. Network truth keeps **L2, IP, default route and DNS facts separate**. Wi-Fi connection truth must never be inferred as `connected == has_ip`.
 8. The runtime keeps the existing bounded `poll()` reactor. The current FD count does not justify adding epoll or a larger event framework.
@@ -97,6 +97,37 @@ NetworkControlPlane
 ```
 
 `UdhcpcProcess` generation-fences every DHCP lifecycle. Late callback events from a stopped client cannot overwrite facts belonging to a newer DHCP generation.
+
+### Ethernet configuration and carrier lifecycle
+
+`/data/network-service/ethernet.json` is the authoritative persisted Ethernet
+configuration (`/dnake/data` resolves to the same data partition on the target).
+At daemon startup, `EthernetStartup` validates that file before any network
+mutation, adopts a verified NetworkService-owned `udhcpc` when possible, and
+otherwise applies the configured DHCP or static mode.
+
+`EthernetManager` then reconciles kernel carrier truth in the existing bounded
+reactor:
+
+```text
+Netlink / periodic snapshot
+           |
+           v
+    EthernetManager
+      |           |
+carrier down   carrier up
+      |           |
+      v           v
+clear owned    restore DHCP/static
+IP/route/DNS   config through ControlPlane
+```
+
+An unexpected Ethernet DHCP process exit schedules at most five retries with a
+1/2/4/8/8-second bounded exponential backoff. Carrier loss or an explicit
+static configuration cancels the pending retry budget. Static Ethernet is also
+withdrawn while carrier is down so its metric-10 route cannot prevent the
+metric-20 Wi-Fi route from becoming usable; the authoritative static config is
+replayed once carrier returns.
 
 ### IP / Route / DNS application
 
