@@ -3,7 +3,7 @@
 ## 状态
 
 - 发现日期：2026-09-14
-- 状态：待板端网络抓包确认
+- 状态：DHCP 初始失败仍待板端抓包确认；有线调试链路与默认路由分流已确认
 - 当前设备地址：`192.168.68.199`
 - 早期调试地址：`192.168.68.90`
 
@@ -30,7 +30,7 @@
 1. AP/DHCP 服务没有返回 Offer，或访客网络/VLAN/客户端隔离阻断了 DHCP；
 2. Offer 已到达无线网卡，但 Realtek 驱动或本地网络配置没有正确接收/应用。
 
-开发机已安装 ADB，但从当前开发机到 `192.168.68.199:5555` 仍返回 `No route to host`，且 ARP 为 incomplete，因此尚未取得板端实时证据。
+开发机已安装 ADB。早期从开发机访问板端时，`192.168.68.90:5555`/`192.168.68.199:5555` 曾出现不可达或 `offline`，因此当时不能取得板端实时证据；后续通过 telnet 9900 登录板端并重新拉起 `adbd` 后，ADB 已恢复为 `device`。
 
 ## 新增板端证据
 
@@ -65,17 +65,83 @@ route add default gw 192.168.68.1 dev wlan0 metric 20
 - `wlan0` 为 `LOWER_UP`，到网关和 `8.8.8.8` 的 ping 均成功；
 - 当前仅存在 `wlan0` 的 NetworkService-owned `udhcpc` 进程，`eth0` 的 `192.168.68.90` 不是该 DHCP 生命周期产生的可验证 lease。
 
-因此后续 Wi-Fi 断开/重连测试应先把调试机回程和默认流量固定到有线接口，例如开发机地址为 `192.168.68.197` 时：
+因此后续 Wi-Fi 断开/重连测试应只把调试机回程固定到有线接口；不要仅因 `eth0` 有静态地址就把互联网默认路由切到 `eth0`。例如开发机地址为 `192.168.68.197` 时：
 
 ```sh
 ip route replace 192.168.68.197/32 dev eth0 src 192.168.68.90
-ip route replace 192.168.68.1/32 dev eth0 src 192.168.68.90
-ip route replace default via 192.168.68.1 dev eth0 src 192.168.68.90 metric 10
 ip route get 192.168.68.197
 ip route get 8.8.8.8
 ```
 
-这组命令只改变当前内核路由，重启或网络配置重载后会失效。由于开发机当前仍无法访问 `.90:5555`，需要先在串口/本地 shell 执行上述固定回程路由，再重试 ADB。
+当前现场验证结果是：`192.168.68.197` 经 `eth0` 可达，但 `192.168.68.1` 经 `eth0` 不通；同一网关和公网地址经 `wlan0` 均可达。因此，若设备当前仍有无线互联网连接，应保持默认路由在 `wlan0`，仅保留上面的调试主机 `/32` 路由。上述命令只改变当前内核路由，重启或网络配置重载后会失效。
+
+## 后续首选调试入口：telnet 9900
+
+设备的 telnet 服务监听在 `9900`，可从开发机直接进入板端 shell：
+
+```sh
+telnet 192.168.68.90 9900
+```
+
+登录用户为 `root`；密码使用现场配置的 root 密码，不写入仓库、脚本或日志。登录后先执行以下最小检查：
+
+```sh
+id
+ip addr show eth0
+ip route
+ps | grep adbd | grep -v grep
+```
+
+后续 Wi-Fi 断开/重连测试优先保持这个有线 telnet 会话，避免无线接口变化导致调试通道丢失。telnet 为明文协议，只应在受控的板端调试网段使用。
+
+## ADB 恢复记录
+
+### 现象
+
+主机侧曾出现：
+
+```text
+adb connect 192.168.68.90:5555
+already connected to 192.168.68.90:5555
+adb devices -l
+192.168.68.90:5555    offline
+```
+
+但 TCP 5555 端口可以建立连接，说明有线网络路径可达；问题发生在 ADB 协议握手阶段，而不是 `eth0` 的基本连通性。
+
+### 根因与恢复
+
+telnet 登录后确认 `/usr/sbin/adbd` 正在监听 `0.0.0.0:5555`，但该进程的父进程是交互式 `sh`，说明它是从 telnet shell 手工后台启动的，标准输入/输出没有脱离会话。终止旧进程并使用脱离终端的方式重新启动后，ADB 从 `offline` 恢复为 `device`：
+
+```sh
+ps | grep adbd | grep -v grep
+kill -TERM <adbd-pid>
+nohup /usr/sbin/adbd >/dev/null 2>&1 </dev/null &
+```
+
+然后在开发机清理旧 transport 并重新连接：
+
+```sh
+adb disconnect 192.168.68.90:5555
+adb kill-server
+adb start-server
+adb connect 192.168.68.90:5555
+adb devices -l
+adb -s 192.168.68.90:5555 get-state
+```
+
+期望最后一条输出为 `device`。当前镜像未提供 Android 的 `setprop`、`stop`、`start` 命令，后续应沿用 `/usr/sbin/adbd` 的直接启动方式；若镜像增加了 supervisor，应优先使用 supervisor 的重启入口，避免重复启动监听进程。
+
+### 当前确认结果
+
+ADB 恢复后实测：
+
+- `ip route get 192.168.68.197` 明确选择 `dev eth0 src 192.168.68.90`；
+- 经 `eth0` ping 开发机 `3/3` 成功；
+- `networkctl status` 在错误的 `eth0` 默认路由存在时为 `online=false`；删除该默认路由、恢复 `wlan0` 默认路由后为 `online=true`，并显示 DNS `192.168.68.1`；
+- Wi-Fi 侧 `wpa_state=COMPLETED`，地址为 `192.168.68.199`，经 `wlan0` ping 网关和 `8.8.8.8` 均成功。
+
+因此，后续定位 DHCP/Wi-Fi 时应通过 `192.168.68.90` 的 telnet 或 ADB 进入设备，同时让互联网默认流量继续走实际可用的 `wlan0`，两者不要混为同一条默认路由。
 
 ## 复现与取证
 
