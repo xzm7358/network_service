@@ -193,6 +193,11 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/network_service_supervisor_test.sh
             ${CMAKE_CURRENT_SOURCE_DIR}/packaging/S40network_service)
 
+    add_test(NAME network_service_factory_data_bootstrap
+        COMMAND sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/network_service_bootstrap_test.sh
+            ${CMAKE_CURRENT_SOURCE_DIR}/packaging/S40network_service)
+
     add_test(NAME rcs_ethernet_migration
         COMMAND sh
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/rcs_ethernet_migration_test.sh

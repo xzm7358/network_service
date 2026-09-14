@@ -91,6 +91,22 @@ The backend currently exposes no public v1 operations for `renew-dhcp`,
 `eth-refresh`, or `evaluate-policy`, so those commands are intentionally not
 advertised by this CLI.
 
+## Factory-data bootstrap
+
+The deployed `S40network_service` script treats `/data/network-service` as the
+persistent configuration authority. A normal `start` bootstraps a factory-empty
+data partition before launching any child process; the same operation can be run
+explicitly with:
+
+```sh
+/etc/init.d/S40network_service bootstrap
+```
+
+The first bootstrap creates DHCP `ethernet.json` and a writable
+`wpa_supplicant.conf`. It imports `/dnake/etc/wifi/wpa_supplicant.conf` once when
+that rootfs seed exists, or creates a minimal Wi-Fi file otherwise. Existing
+files are never overwritten.
+
 ## EEP Brownfield Adoption
 
 This repository adopts Embedded Engineering Platform release `1.20.0` in brownfield mode. Machine-readable adoption metadata lives in `.eep/`.

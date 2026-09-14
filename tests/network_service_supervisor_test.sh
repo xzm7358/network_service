@@ -11,6 +11,16 @@ SUP_PIDFILE="$TMP/supervisor.pid"
 CHILD_PIDFILE="$TMP/child.pid"
 LOCKDIR="$TMP/supervisor.lock"
 SOCKET="$TMP/network.sock"
+WPA_SEED="$TMP/wpa_supplicant.seed"
+
+cat > "$WPA_SEED" <<'EOF'
+update_config=0
+persistent_reconnect=1
+network={
+  ssid="factory-network"
+  key_mgmt=NONE
+}
+EOF
 
 cat > "$FAKE" <<'EOF'
 #!/bin/sh
@@ -39,6 +49,7 @@ run_init() {
   NETWORK_SERVICE_BIN="$FAKE" \
   NETWORK_SERVICE_SOCKET="$SOCKET" \
   NETWORK_SERVICE_CONFIG_DIR="$TMP/config" \
+  NETWORK_SERVICE_WPA_SEED="$WPA_SEED" \
   NETWORK_SERVICE_EVENT_DIR="$TMP/wpa" \
   NETWORK_SERVICE_RESTART_DELAY=1 \
   NETWORK_SERVICE_START_CHECK_SECONDS=5 \
@@ -75,6 +86,28 @@ wait_for_child() {
 }
 
 run_init start >/dev/null
+
+# A factory-flashed device has an empty writable /data partition. The init
+# path must materialize both authoritative files before the daemon is allowed
+# to run, otherwise Ethernet remains an in-memory default and SAVE_CONFIG has
+# no writable Wi-Fi destination.
+if [ "$(cat "$TMP/config/network-service/ethernet.json" 2>/dev/null || true)" != \
+     '{"mode":"dhcp"}' ]; then
+  echo "network_service_supervisor_test: empty data did not bootstrap ethernet.json" >&2
+  exit 1
+fi
+if ! grep -q '^ctrl_interface=' \
+    "$TMP/config/network-service/wpa_supplicant.conf" 2>/dev/null ||
+   ! grep -q '^update_config=1$' \
+    "$TMP/config/network-service/wpa_supplicant.conf" 2>/dev/null; then
+  echo "network_service_supervisor_test: empty data did not bootstrap writable Wi-Fi config" >&2
+  exit 1
+fi
+if ! grep -q 'ssid="factory-network"' \
+    "$TMP/config/network-service/wpa_supplicant.conf"; then
+  echo "network_service_supervisor_test: factory Wi-Fi seed was not imported" >&2
+  exit 1
+fi
 
 # The first fake daemon exits with 42. A successful start therefore proves the
 # supervisor restarted it and published a later live child.

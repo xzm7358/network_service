@@ -68,6 +68,21 @@
 
 `eth0` 不是永久的“仅调试管理链路”。它是正常上行接口，默认优先级高于 Wi-Fi：健康的 Ethernet 使用 metric 10，Wi-Fi 使用 metric 20。此前只保留到开发机的 eth0 `/32` 路由，是现场排障期间为了不丢失 telnet/ADB 的临时措施，不是产品策略。
 
+### 5. 首次刷机的空 `/data` 原先没有形成闭环
+
+设备首次烧写后 `/data` 为空。修复前代码只做了运行态兜底：缺少
+`ethernet.json` 时在内存中返回 DHCP 默认值，但不创建权威文件；缺少
+`wpa_supplicant.conf` 时以 `wpa_supplicant -C` 启动，也没有供
+`SAVE_CONFIG` 写回的配置文件。因此既有设备上的两个文件不能证明首次启动场景已被
+覆盖，`rcS` 迁移工具还会因缺少 `ethernet.json` 主动拒绝迁移。
+
+现在由 `S40network_service` 在启动子进程前执行幂等 bootstrap：创建
+`/data/network-service`，首次生成 DHCP `ethernet.json`；Wi-Fi 优先一次性导入
+rootfs 中 `/dnake/etc/wifi/wpa_supplicant.conf`，否则生成最小配置，并强制
+`ctrl_interface` 与运行目录一致、`update_config=1`。已有文件绝不覆盖；Ethernet
+文件权限为 `0644`，可能包含凭据的 Wi-Fi 文件为 `0600`。初始化失败时 supervisor
+拒绝启动，避免再次退化为只有内存状态的网络配置。
+
 ## 已实施的正确修复
 
 1. `/data/network-service/ethernet.json` 成为唯一写入权威；支持 DHCP/static JSON 校验与原子提交。JSON 缺失时可一次性导入旧 `smart_hmi_ethernet.conf`，JSON 一旦存在就绝不回退。
@@ -75,6 +90,9 @@
 3. 新增 Ethernet carrier 生命周期：断线时撤销 NetworkService 精确拥有的 IP/默认路由/DNS，恢复时重启 DHCP 或重放静态配置；DHCP 进程意外退出后按 1/2/4/8/8 秒最多重试 5 次。这样健康 eth0 优先，eth0 失效时 Wi-Fi 才能真实接管。
 4. 守护进程和监督脚本默认配置根目录改为 `/data`。新增 `ethernet-json-v1` 能力检查和配置校验入口。
 5. 提供 `network_service_migrate_rcs_ethernet` 发布迁移工具。它仅删除精确的 `ifconfig eth0 192.168.68.90` 命令，保留其他 rcS 内容和权限，首次执行保留恢复备份；新服务能力或 `ethernet.json` 校验失败时拒绝修改。
+6. 补齐出厂空 `/data` 引导：`S40network_service bootstrap` 可独立执行，正常
+   `start` 也会先完成相同初始化；新增空目录、rootfs seed 导入和不覆盖已有配置的
+   Linux 回归测试。
 
 ## `/etc/init.d/rcS` 静态 `.90` 是否还有必要
 
@@ -91,6 +109,10 @@ NETWORK_SERVICE_CONFIG_DIR=/data \
 RCS_PATH=/etc/init.d/rcS \
 /dnake/bin/network_service_migrate_rcs_ethernet
 ```
+
+新烧写设备应先让 `S40network_service start`（或显式执行其 `bootstrap` 子命令）
+生成权威文件，再运行迁移工具。迁移工具继续坚持“文件不存在就拒绝修改 rcS”，这是
+防止旧服务或不完整发布物误删救援地址的安全门，而不是由迁移工具重复创建配置。
 
 迁移后应确认 `/etc/init.d/rcS.pre-network-service` 备份存在，并执行完整冷启动验证；不要在当前远程调试会话中直接手工删行来代替发布迁移。
 

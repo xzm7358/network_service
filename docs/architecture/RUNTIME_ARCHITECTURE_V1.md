@@ -100,6 +100,15 @@ NetworkControlPlane
 
 ### Ethernet configuration and carrier lifecycle
 
+The deployed `S40network_service` init path owns factory-data bootstrap before it
+launches either `wpa_supplicant` or the daemon. On an empty writable `/data`
+partition it atomically creates `/data/network-service/ethernet.json` with DHCP
+mode and a writable `wpa_supplicant.conf`. The Wi-Fi file is imported once from
+the immutable `/dnake/etc/wifi/wpa_supplicant.conf` seed when available; otherwise
+a minimal config is created. Existing persistent files are never overwritten.
+Bootstrap failure prevents the supervisor from launching a runtime that cannot
+persist its configuration.
+
 `/data/network-service/ethernet.json` is the authoritative persisted Ethernet
 configuration (`/dnake/data` resolves to the same data partition on the target).
 At daemon startup, `EthernetStartup` validates that file before any network

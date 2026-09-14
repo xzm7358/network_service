@@ -12,6 +12,7 @@
 - 阶段 2：已完成，生产启动会应用或接管权威 Ethernet 配置。
 - 阶段 3：已完成，DHCP/static carrier 生命周期与有界 DHCP 重试已接入 reactor。
 - 阶段 4：发布工具已通过 Linux、ARM 交叉编译和板端 `/tmp/rcS.test` 验证；目标板 `rcS` 尚未修改，真实拔线与新镜像冷启动通过后再执行。
+- 阶段 5：已完成，补齐首次烧写后空 `/data` 的 Ethernet/Wi-Fi 幂等初始化与回归测试。
 
 ## 已确认现状
 
@@ -75,6 +76,18 @@
 影响面：packaging、rootfs 集成、HIL 验证文档。当前仓库不直接拥有板端
 `/etc/init.d/rcS`，因此不能用源码提交假装设备已迁移。
 
+## 阶段 5：首次启动持久化引导
+
+- supervisor 启动守护进程前创建 `/data/network-service`。
+- 缺少 Ethernet 配置时原子生成 `{"mode":"dhcp"}`，不再只保留内存默认值。
+- 缺少 Wi-Fi 配置时一次性导入 rootfs seed；无 seed 时生成包含正确
+  `ctrl_interface` 和 `update_config=1` 的最小文件。
+- 初始化只创建缺失文件，不覆盖用户配置；Wi-Fi 文件以 `0600` 保存。
+- 初始化失败时拒绝启动，避免不可持久化的运行态继续提供假成功。
+
+影响面：`packaging/S40network_service`、supervisor/factory-data 回归、运行架构和
+故障记录。
+
 ## 验证清单
 
 - JSON DHCP/static 读写、无效输入、原子提交、旧格式迁移。
@@ -85,6 +98,8 @@
 - 服务重启能 adopt generation 匹配的 eth0/wlan0 DHCP。
 - 旧 `wpa_action.sh/default.script` 未参与生产 DHCP 生命周期。
 - rcS 迁移脚本拒绝旧服务、精确修改、可重复执行。
+- 空 `/data` 首启生成 Ethernet/Wi-Fi 权威文件，导入 rootfs Wi-Fi seed，并在重启时
+  保留已有用户配置。
 - 板端 `primary_iface=eth0`（有线健康）与 `primary_iface=wlan0`（有线失效）均通过。
 
 ## 提交策略
