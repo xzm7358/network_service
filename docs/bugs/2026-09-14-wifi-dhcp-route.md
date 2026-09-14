@@ -3,7 +3,7 @@
 ## 状态
 
 - 发现日期：2026-09-14
-- 状态：配置权威、启动收敛、Ethernet carrier 生命周期和 rcS 发布迁移已完成 host 实现；目标板冷启动/HIL 与 rcS 实际迁移待执行
+- 状态：配置权威、启动收敛、Ethernet carrier 生命周期和 rcS 发布迁移已完成；目标板 DHCP/重启/进程恢复 HIL 通过，物理拔线与新镜像冷启动待执行
 - 当前设备地址：`192.168.68.199`
 - 早期调试地址：`192.168.68.90`
 
@@ -44,7 +44,9 @@
 
 `-I eth0` 已把 ICMP 请求固定到 `eth0`，所以这不是默认路由误选 `wlan0`。现场抓取到的事实是：ARP 可解析网关，请求从 `eth0` 发出，但没有 Echo Reply 返回；相同网关经 `wlan0` 可达。因此丢包边界位于 `eth0` 请求发出之后、回复进入板端之前。
 
-`eth0=192.168.68.90/24` 是 `rcS` 无条件写入的静态地址，不是路由器 DHCP 给出的、由 NetworkService generation/lease 机制可验证的租约。与之相对，`wlan0=192.168.68.199/24` 来自 `192.168.68.1` 的 DHCP Offer/ACK。最符合现有证据的解释是路由器侧只接受/学习了 DHCP 授权的 `.199`，或对静态 `.90` 存在地址绑定、冲突/防欺骗策略；仅凭板端抓包还不能区分这些路由器内部机制。若切换为 eth0 DHCP 后仍失败，必须同时采集路由器/交换侧日志或镜像口报文，不能再归因于“不同二层”。
+`eth0=192.168.68.90/24` 是 `rcS` 无条件写入的静态地址，不是路由器 DHCP 给出的、由 NetworkService generation/lease 机制可验证的租约。与之相对，`wlan0=192.168.68.199/24` 来自 `192.168.68.1` 的 DHCP Offer/ACK。
+
+修复版 NetworkService 上板后，eth0 从同一 DHCP 服务器获得 `.196`。租约刚收敛后的第一轮 ping 仍出现过 100% 丢包，但随后的 eth0 抓包同时看到三组 Echo Request 与 Echo Reply，立即复测网关和 `8.8.8.8` 均为 0% 丢包。这说明原 100% 丢包不是“回复永远到不了 eth0”，而是旧静态地址或路由器/邻居学习窗口中的瞬时状态；现有证据不足以再细分路由器内部机制。确定的软件问题是旧服务没有消费 DHCP 权威配置，并可能把不可用 eth0 路由错误提升为 metric 10；修复后 eth0 DHCP 可稳定成为主链路。
 
 ### 3. 配置权威错位才是代码根因
 
@@ -91,6 +93,30 @@ RCS_PATH=/etc/init.d/rcS \
 ```
 
 迁移后应确认 `/etc/init.d/rcS.pre-network-service` 备份存在，并执行完整冷启动验证；不要在当前远程调试会话中直接手工删行来代替发布迁移。
+
+## 修复版目标板 HIL 记录
+
+使用 OrbStack `ubuntu-amd64` 虚拟机内的
+`arm-linux-gnueabihf-g++ 8.2.1` 与仓库
+`Components/hardware/ssd20x/toolchain.cmake` 完成交叉编译。产物为 ARM EABI5、
+`/lib/ld-linux-armhf.so.3` 动态加载；放入板端 `/tmp` 后能力检查与
+`/data/network-service/ethernet.json` 校验均通过。
+
+在不修改只读 `/dnake/bin` 和真实 `rcS` 的前提下，通过现有 supervisor 的
+`NETWORK_SERVICE_BIN=/tmp/network_service.new` 注入修复版，得到以下结果：
+
+- eth0 DHCP 获得 `192.168.68.196/24`，网关/DNS 为 `192.168.68.1`；
+- eth0 默认路由 metric 10，wlan0 默认路由 metric 20，
+  `primary_iface=eth0`、`online=true`；
+- eth0 到网关和 `8.8.8.8` 最终连续 3/3 成功；
+- 重启守护进程后，eth0/wlan0 原 DHCP PID 被原位 adopt，没有重复启动；
+- 强杀 eth0 `udhcpc` 后，服务按退避启动新 PID，恢复 `.196`、metric 10 和网关连通；
+- `ip link set eth0 down` 后生命周期迅速完成停止并重新启动，DHCP generation 发生变化；由于物理 carrier 仍在，该操作不能替代持续拔线测试；
+- 迁移工具在板端 BusyBox 上对 `/tmp/rcS.test` 精确删除一行并保留权限/备份，真实 `/etc/init.d/rcS` 第 4 行保持不变。
+
+板端 `/dnake/bin` 为只读镜像，无法在线持久替换。因此剩余发布动作是把新二进制、
+监督脚本和迁移工具纳入下一版 rootfs，先完成真实网线拔插和新镜像冷启动，再运行
+迁移工具修改真实 `rcS`。
 
 ## 新增板端证据
 
