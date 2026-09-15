@@ -125,8 +125,15 @@ target_link_libraries(${NETWORK_SERVICE_TARGET}
     PRIVATE
         NetworkService::IPC
 )
+if(DEFINED LVSIM_EFFECTIVE_RUNTIME_OUTPUT_DIRECTORY)
+    set(_NETWORK_SERVICE_RUNTIME_OUTPUT_DIRECTORY
+        "${LVSIM_EFFECTIVE_RUNTIME_OUTPUT_DIRECTORY}")
+else()
+    set(_NETWORK_SERVICE_RUNTIME_OUTPUT_DIRECTORY
+        "${CMAKE_SOURCE_DIR}/app/smartcontrol/dnake/bin")
+endif()
 set_target_properties(${NETWORK_SERVICE_TARGET} PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/app/smartcontrol/dnake/bin"
+    RUNTIME_OUTPUT_DIRECTORY "${_NETWORK_SERVICE_RUNTIME_OUTPUT_DIRECTORY}"
 )
 
 add_executable(networkctl
@@ -140,7 +147,7 @@ target_link_libraries(networkctl
 # and NetworkService::Client does not propagate the C++17 requirement.
 target_compile_features(networkctl PRIVATE cxx_std_17)
 set_target_properties(networkctl PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/app/smartcontrol/dnake/bin"
+    RUNTIME_OUTPUT_DIRECTORY "${_NETWORK_SERVICE_RUNTIME_OUTPUT_DIRECTORY}"
 )
 
 include(CTest)
