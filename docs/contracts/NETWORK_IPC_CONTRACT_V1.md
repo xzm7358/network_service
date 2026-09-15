@@ -334,3 +334,12 @@ the NetworkDaemon business surface.
 `wifi.save` stores or updates credentials without selecting the profile. Its
 params are `ssid` (non-empty string), `password` (string), and optional
 `autoconnect` (boolean, default `true`).
+
+SSID values in `wifi.scan.status`, `wifi.saved_list`, `network.snapshot`, and
+Wi-Fi status events are JSON UTF-8 strings, not the printable byte-escape form
+used by the `wpa_supplicant` control interface. Platform decodes `\\xNN`, quoted
+character, backslash, and control-character escapes before the value crosses
+the IPC boundary. If an SSID is an arbitrary byte sequence that is not valid
+UTF-8, Platform retains the supplicant's printable escaped representation so
+the JSON frame remains valid. `wifi.connect` and `wifi.save` accept 1 to 32
+SSID bytes and pass those bytes to `wpa_supplicant` in hexadecimal form.

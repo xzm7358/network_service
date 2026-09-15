@@ -94,6 +94,21 @@ rootfs 中 `/dnake/etc/wifi/wpa_supplicant.conf`，否则生成最小配置，�
    `start` 也会先完成相同初始化；新增空目录、rootfs seed 导入和不覆盖已有配置的
    Linux 回归测试。
 
+## `networkctl scan` 中文/特殊字符 SSID
+
+`SCAN_RESULTS` 是 `wpa_supplicant` 的文本控制协议，不是 UTF-8 JSON。它会用
+`printf_encode()` 把 SSID 的原始字节变成可打印文本：中文 UTF-8 字节因而显示为
+`\\xe5\\xbf...`，引号、反斜杠和控制字符也会使用反斜杠转义。旧实现把这一列原样
+写入 `WifiApRecord::ssid`；IPC 层随后又按 JSON 规则转义反斜杠，于是
+`networkctl` 最终显示 `\\\\xe5...`。终端编码不是根因，JSON 层的二次转义也只是
+放大症状；根因是 Platform 没有在 supplicant 文本边界执行逆变换。
+
+修复后，扫描结果、已保存网络和 `STATUS` 的 SSID 共用同一解码器。合法 UTF-8
+（包括中文、emoji、引号和反斜杠）恢复为真实字符，再由 IPC 做一次标准 JSON
+转义；非法 UTF-8 的任意字节 SSID 保留 supplicant 可打印形式，避免生成非法 JSON。
+反向配置网络时不再把 SSID 拼成带引号的控制命令，而是使用 supplicant 支持的
+十六进制 SSID 参数，保证 1--32 字节原样写入。
+
 ## `/etc/init.d/rcS` 静态 `.90` 是否还有必要
 
 结论分两个发布阶段：

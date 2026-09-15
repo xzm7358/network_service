@@ -141,13 +141,13 @@ void test_wifi_scan_and_saved_payloads() {
     ap.frequency = 2412;
     ap.signal_dbm = -42;
     ap.flags = "[WPA2-PSK-CCMP][ESS]";
-    ap.ssid = "Home\"Lab";
+    ap.ssid = u8"中文\t\"Lab";
     const std::vector<network_service::WifiApRecord> aps{ap};
     const std::string scan = network_service::ipc_representation::wifi_scan_payload(aps);
     require(scan.find("\"count\":1") != std::string::npos,
             "Wi-Fi scan count changed");
-    require(scan.find("Home\\\"Lab") != std::string::npos,
-            "Wi-Fi scan escaping changed");
+    require(scan.find(u8"中文\\t\\\"Lab") != std::string::npos,
+            "Wi-Fi scan UTF-8/control-character escaping changed");
 
     network_service::WifiSavedNetwork saved;
     saved.network_id = 3;

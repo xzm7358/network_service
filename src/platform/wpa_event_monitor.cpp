@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "platform/wpa_ctrl_client.h"
+#include "platform/wpa_text_codec.h"
 
 namespace network_service {
 
@@ -108,7 +109,7 @@ bool parse_wpa_status_reply(const std::string &reply, WpaStatusFact &fact) {
             fact.l2_state = l2_state_for_status(value);
             have_state = true;
         } else if (key == "ssid") {
-            fact.ssid = value;
+            fact.ssid = decode_wpa_printable_text(value);
         } else if (key == "bssid") {
             fact.bssid = value;
         }

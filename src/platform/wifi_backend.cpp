@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include "platform/wpa_ctrl_client.h"
+#include "platform/wpa_text_codec.h"
 
 namespace network_service {
 
@@ -149,7 +150,7 @@ std::vector<WifiSavedNetwork> parse_saved_networks(const std::string &output) {
         if (fields.size() < 2) continue;
         WifiSavedNetwork record;
         record.network_id = parse_network_id(fields[0]);
-        record.ssid = fields[1];
+        record.ssid = decode_wpa_printable_text(fields[1]);
         record.bssid = fields.size() >= 3 ? fields[2] : "";
         record.flags = fields.size() >= 4 ? fields[3] : "";
         parse_saved_flags(record.flags, record);
@@ -158,7 +159,7 @@ std::vector<WifiSavedNetwork> parse_saved_networks(const std::string &output) {
     return records;
 }
 
-std::vector<WifiApRecord> parse_scan_results(const std::string &output) {
+std::vector<WifiApRecord> parse_scan_results_text(const std::string &output) {
     std::vector<WifiApRecord> records;
     std::istringstream input(output);
     std::string line;
@@ -177,13 +178,17 @@ std::vector<WifiApRecord> parse_scan_results(const std::string &output) {
         record.frequency = atoi(fields[1].c_str());
         record.signal_dbm = atoi(fields[2].c_str());
         record.flags = fields[3];
-        record.ssid = fields[4];
+        record.ssid = decode_wpa_printable_text(fields[4]);
         records.push_back(record);
     }
     return records;
 }
 
 } // namespace
+
+std::vector<WifiApRecord> parse_wpa_scan_results(const std::string &output) {
+    return parse_scan_results_text(output);
+}
 
 bool wifi_ensure_interface_up(const std::string &iface, std::string &error) {
     if (!is_safe_iface(iface)) {
@@ -238,15 +243,14 @@ bool wifi_configure_profile(const std::string &iface,
         error = "invalid wifi iface";
         return false;
     }
-    if (ssid.empty()) {
-        error = "ssid is required";
+    if (ssid.empty() || ssid.size() > 32) {
+        error = ssid.empty() ? "ssid is required" : "ssid exceeds 32-byte limit";
         return false;
     }
 
-    std::string quoted_ssid;
-    if (!wpa_quote(ssid, quoted_ssid, error)) return false;
     if (!wpa_ok(iface,
-                "SET_NETWORK " + std::to_string(id) + " ssid " + quoted_ssid,
+                "SET_NETWORK " + std::to_string(id) + " ssid " +
+                    encode_wpa_ssid_hex(ssid),
                 error)) {
         return false;
     }
@@ -280,8 +284,8 @@ int wifi_create_profile(const std::string &iface,
         error = "invalid wifi iface";
         return -1;
     }
-    if (ssid.empty()) {
-        error = "ssid is required";
+    if (ssid.empty() || ssid.size() > 32) {
+        error = ssid.empty() ? "ssid is required" : "ssid exceeds 32-byte limit";
         return -1;
     }
 
@@ -301,10 +305,9 @@ int wifi_create_profile(const std::string &iface,
         return -1;
     };
 
-    std::string quoted_ssid;
-    if (!wpa_quote(ssid, quoted_ssid, error)) return fail_after_add();
     if (!wpa_ok(iface,
-                "SET_NETWORK " + std::to_string(id) + " ssid " + quoted_ssid,
+                "SET_NETWORK " + std::to_string(id) + " ssid " +
+                    encode_wpa_ssid_hex(ssid),
                 error)) {
         return fail_after_add();
     }
@@ -411,7 +414,7 @@ std::vector<WifiApRecord> wifi_scan_results(const std::string &iface,
     }
     std::string reply;
     if (!wpa_request(iface, "SCAN_RESULTS", reply, error)) return {};
-    return parse_scan_results(reply);
+    return parse_wpa_scan_results(reply);
 }
 
 std::vector<WifiApRecord> wifi_scan(const std::string &iface, std::string &error) {

@@ -40,6 +40,9 @@ bool wifi_remove_profile(const std::string &iface,
 bool wifi_save_profiles(const std::string &iface, std::string &error);
 
 bool wifi_scan_start(const std::string &iface, std::string &error);
+// Parse the text contract returned by wpa_supplicant's SCAN_RESULTS command.
+// Kept at the Platform seam so the exact target reply can be replayed in tests.
+std::vector<WifiApRecord> parse_wpa_scan_results(const std::string &output);
 std::vector<WifiApRecord> wifi_scan_results(const std::string &iface, std::string &error);
 std::vector<WifiApRecord> wifi_scan(const std::string &iface, std::string &error);
 std::vector<WifiSavedNetwork> wifi_list_saved(const std::string &iface, std::string &error);

@@ -31,6 +31,7 @@ add_library(network_service_platform STATIC
     src/platform/wifi_backend.cpp
     src/platform/wpa_ctrl_client.cpp
     src/platform/wpa_event_monitor.cpp
+    src/platform/wpa_text_codec.cpp
 )
 target_include_directories(network_service_platform
     PUBLIC
@@ -344,6 +345,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(wpa_ctrl_client_test PRIVATE NetworkService::Platform)
     add_test(NAME wpa_ctrl_client COMMAND wpa_ctrl_client_test)
+
+    add_executable(wifi_backend_text_test
+        tests/wifi_backend_text_test.cpp
+    )
+    target_link_libraries(wifi_backend_text_test PRIVATE NetworkService::Platform)
+    add_test(NAME wifi_backend_text COMMAND wifi_backend_text_test)
 
     add_executable(wpa_event_monitor_test
         tests/wpa_event_monitor_test.cpp

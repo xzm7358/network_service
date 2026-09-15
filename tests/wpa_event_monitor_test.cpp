@@ -98,6 +98,12 @@ int main() {
                     "COMPLETED STATUS projection mismatch") && ok;
 
         ok = expect(network_service::parse_wpa_status_reply(
+                        "ssid=\\xe4\\xb8\\xad\\xe6\\x96\\x87 AP\n"
+                        "wpa_state=COMPLETED\n",
+                        status) && status.ssid == u8"中文 AP",
+                    "escaped UTF-8 STATUS SSID was not decoded") && ok;
+
+        ok = expect(network_service::parse_wpa_status_reply(
                         "wpa_state=4WAY_HANDSHAKE\n", status) &&
                     status.l2_state == WifiL2State::Handshake,
                     "handshake STATUS projection mismatch") && ok;

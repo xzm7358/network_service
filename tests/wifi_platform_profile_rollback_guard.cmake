@@ -22,7 +22,7 @@ endif()
 
 string(REGEX MATCHALL "return fail_after_add\\(\\);" rollback_returns "${source}")
 list(LENGTH rollback_returns rollback_return_count)
-if(rollback_return_count LESS 5)
+if(rollback_return_count LESS 4)
     message(FATAL_ERROR
         "WIFI_PROFILE_ROLLBACK_GUARD: not all post-ADD_NETWORK failure paths rollback; count=${rollback_return_count}")
 endif()
